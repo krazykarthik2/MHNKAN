@@ -41,4 +41,4 @@ Rec KAN:   GCTAGCTCATCTTGCGGCTGGGCGGGGCCCAGGACTGCTGCTGCTGACCGCCTTGATAGGCTACACCGT
 
 Below is the visualization saved during execution showing the sequence alignment and reconstruction status:
 
-![Genomic Reconstruction Proof](file:///C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/genomic_reconstruction.png)
+![Genomic Reconstruction Proof](./genomic_reconstruction.png)
