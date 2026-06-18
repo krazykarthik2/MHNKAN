@@ -55,6 +55,12 @@ The project is structured experiment-wise to keep the code, generated visual pro
 │       ├── GENOMIC_RECONSTRUCTION_PROOF.md   # Base recovery rate & alignment metrics
 │       └── genomic_reconstruction.png        # Nucleotide sequence reconstruction alignment plot
 │
+├── KAN_EML/                                  # KAN enhanced with the Exp-Minus-Log (EML) operator
+│   ├── README.md                             # EML-KAN mathematical background and results summary
+│   ├── eml_network.py                        # EMLKANLayer and EMLKAN model architectures
+│   ├── complex_data_experiment.py            # Target function recovery (achieving Loss = 0.0)
+│   └── real_world_experiment.py              # Wine dataset training (achieving 100.00% Test Accuracy)
+│
 ├── reports/                                  # Project reports & analyses
 │   ├── KAN_CROSS_ATTENTION_FORMULA.md        # KAN-wise summation notation of cross-attention
 │   ├── COMPARATIVE_METRICS.md                # FLOPs, parameters, and time complexity table
