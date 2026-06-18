@@ -15,126 +15,124 @@ from eml_network import EMLKAN
 from kan_hopfield import RBFKAN
 
 def target_function(x):
-    val = torch.zeros(x.shape[0], device=x.device, dtype=x.dtype)
-    for j in range(x.shape[1]):
-        val_x = 1.2 * x[:, j] - 0.3
-        val_y = F.softplus(0.8 * x[:, j] + 0.2) + 1e-6
-        val += torch.exp(val_x) - torch.log(val_y)
-    return val
+    """
+    Complex target function:
+    y = exp(sin(x1) - cos(x2)) - ln(softplus(x1*x2) + 0.1)
+    """
+    x1, x2 = x[:, 0], x[:, 1]
+    val1 = torch.sin(x1) - torch.cos(x2)
+    val2 = F.softplus(x1 * x2) + 0.1
+    return torch.exp(val1) - torch.log(val2)
 
 def main():
-    print("Training both Standard KAN and EML-KAN to extract actual learned curves...")
+    print("Training [2, 6, 1] models on the complex math function to extract all 18 edge curves...")
     
-    # 1. Dataset (float32 for standard KAN training compatibility)
+    # 1. Dataset
     torch.manual_seed(42)
     np.random.seed(42)
-    X_train = (torch.rand(300, 2) * 2.0 - 1.0)
+    X_train = (torch.rand(300, 2) * 3.0 - 1.5) # range [-1.5, 1.5]
     y_train = target_function(X_train).unsqueeze(-1)
     
-    # 2. Train Standard KAN (RBF-based)
+    # 2. Train Standard KAN [2, 6, 1]
     print("Training Standard RBF-KAN...")
-    rbf_kan = RBFKAN(layers_hidden=[2, 1], grid_size=10, grid_range=[-1.2, 1.2])
-    optimizer_rbf = optim.AdamW(rbf_kan.parameters(), lr=0.02)
+    rbf_kan = RBFKAN(layers_hidden=[2, 6, 1], grid_size=10, grid_range=[-2.0, 2.0])
+    optimizer_rbf = optim.AdamW(rbf_kan.parameters(), lr=0.015)
     for epoch in range(1, 1001):
         rbf_kan.train()
         optimizer_rbf.zero_grad()
         loss = F.mse_loss(rbf_kan(X_train), y_train)
         loss.backward()
         optimizer_rbf.step()
-        
-    # 3. Train EML-KAN
+        if epoch % 500 == 0:
+            print(f"  RBF-KAN Loss: {loss.item():.6f}")
+            
+    # 3. Train EML-KAN [2, 6, 1]
     print("Training EML-KAN...")
-    eml_kan = EMLKAN(layers_hidden=[2, 1], num_eml_components=1)
-    # Freeze linear base for pure EML comparison
-    with torch.no_grad():
-        eml_kan.layers[0].weight_base.zero_()
-        eml_kan.layers[0].weight_base.requires_grad = False
-        eml_kan.layers[0].weight_eml.fill_(1.0)
-        eml_kan.layers[0].weight_eml.requires_grad = False
-        
-    optimizer_eml = optim.AdamW(eml_kan.parameters(), lr=0.03)
+    eml_kan = EMLKAN(layers_hidden=[2, 6, 1], num_eml_components=4)
+    optimizer_eml = optim.AdamW(eml_kan.parameters(), lr=0.015)
     for epoch in range(1, 1001):
         eml_kan.train()
         optimizer_eml.zero_grad()
         loss = F.mse_loss(eml_kan(X_train), y_train)
         loss.backward()
         optimizer_eml.step()
-        
-    # Fine-tune EML-KAN with L-BFGS for exact match
-    optimizer_lbfgs = optim.LBFGS(eml_kan.parameters(), lr=0.5, max_iter=100)
-    def closure():
-        optimizer_lbfgs.zero_grad()
-        loss = F.mse_loss(eml_kan(X_train), y_train)
-        loss.backward()
-        return loss
-    optimizer_lbfgs.step(closure)
-    
-    # 4. Extract curves over domain [-1.0, 1.0]
-    x_test_range = np.linspace(-1.0, 1.0, 100)
+        if epoch % 500 == 0:
+            print(f"  EML-KAN Loss: {loss.item():.6f}")
+            
+    # 4. Extract curves over evaluation range
+    x_test_range = np.linspace(-1.5, 1.5, 100)
     x_eval = torch.tensor(x_test_range, dtype=torch.float32).unsqueeze(-1) # [100, 1]
     
-    # Ground Truth Curve for a single feature
-    y_gt = (torch.exp(1.2 * x_eval - 0.3) - torch.log(F.softplus(0.8 * x_eval + 0.2) + 1e-6)).squeeze().numpy()
+    fig, axes = plt.subplots(6, 3, figsize=(18, 25), dpi=150)
+    plt.subplots_adjust(wspace=0.25, hspace=0.35)
     
-    # Evaluate Standard KAN Edge 0 and Edge 1
-    # We pass [x, 0] to evaluate feature 0, and [0, x] to evaluate feature 1
-    rbf_kan.eval()
-    with torch.no_grad():
-        # Feature 0 curve (set feature 1 to zero)
-        eval_f0 = torch.zeros(100, 2)
-        eval_f0[:, 0] = x_eval.squeeze()
-        # The output includes base and RBF: we extract the edge output
-        y_rbf_f0 = rbf_kan(eval_f0).squeeze().numpy()
+    # Helper to compute EML edge output (sum of K components)
+    def get_eml_edge_y(layer, i, j, x):
+        # i: out_feature index, j: in_feature index
+        x_expanded = x.unsqueeze(1).expand(-1, layer.num_eml_components) # [100, K]
+        # Evaluate for specific edge (i, j)
+        a = layer.a[i, j] # [K]
+        b = layer.b[i, j]
+        c = layer.c[i, j]
+        d = layer.d[i, j]
+        w = layer.weight_eml[i, j]
         
-        # Feature 1 curve (set feature 0 to zero)
-        eval_f1 = torch.zeros(100, 2)
-        eval_f1[:, 1] = x_eval.squeeze()
-        y_rbf_f1 = rbf_kan(eval_f1).squeeze().numpy()
+        arg_x = a * x_expanded + b
+        arg_y = F.softplus(c * x_expanded + d) + layer.eps
+        eml_val = torch.exp(torch.clamp(arg_x, -10, 10)) - torch.log(arg_y)
+        edge_out = torch.sum(eml_val * w, dim=-1)
+        return edge_out.detach().cpu().numpy()
         
-    # Evaluate EML-KAN Edge 0 and Edge 1
-    eml_kan.eval()
-    with torch.no_grad():
-        # Evaluate using the KAN layer EML formula directly on the inputs
-        layer = eml_kan.layers[0]
-        # Evaluate feature 0
-        eml_arg_x0 = layer.a[0, 0, 0] * x_eval.squeeze() + layer.b[0, 0, 0]
-        eml_arg_y0 = F.softplus(layer.c[0, 0, 0] * x_eval.squeeze() + layer.d[0, 0, 0]) + layer.eps
-        y_eml_f0 = (torch.exp(eml_arg_x0) - torch.log(eml_arg_y0)).numpy()
+    # Helper to compute Standard RBF-KAN edge output
+    def get_rbf_edge_y(layer, i, j, x):
+        x_expanded = x.unsqueeze(-1) # [100, 1, 1]
+        diff = x_expanded - layer.grid
+        rbf_act = torch.exp(-torch.square(diff) / (2 * (layer.sigma ** 2))) # [100, 1, grid_size]
+        w_rbf = layer.weight_rbf[i, j] # [grid_size]
+        y_rbf = torch.sum(rbf_act * w_rbf.unsqueeze(0).unsqueeze(0), dim=-1).squeeze().detach().cpu().numpy()
+        return y_rbf
+
+    edge_idx = 0
+    # --- Layer 0: Input 2 -> Hidden 6 = 12 Edges ---
+    for i in range(6): # Hidden nodes
+        for j in range(2): # Input nodes
+            row = edge_idx // 3
+            col = edge_idx % 3
+            ax = axes[row, col]
+            
+            y_rbf = get_rbf_edge_y(rbf_kan.layers[0], i, j, x_eval.squeeze())
+            y_eml = get_eml_edge_y(eml_kan.layers[0], i, j, x_eval.squeeze())
+            
+            ax.plot(x_test_range, y_rbf, color='#E11D48', linewidth=2.0, label='Standard RBF-KAN')
+            ax.plot(x_test_range, y_eml, color='#7C3AED', linewidth=2.0, label='EML-KAN')
+            ax.set_title(f"Edge {edge_idx}: Input $x_{j+1} \\rightarrow$ Hidden $h_{i+1}$", fontsize=10, fontweight='bold')
+            ax.grid(True, linestyle="--", alpha=0.4)
+            ax.legend(loc="upper left", fontsize=8)
+            edge_idx += 1
+            
+    # --- Layer 1: Hidden 6 -> Output 1 = 6 Edges ---
+    # Evaluate over typical hidden ranges [-1.5, 1.5]
+    for j in range(6): # Hidden nodes
+        row = edge_idx // 3
+        col = edge_idx % 3
+        ax = axes[row, col]
         
-        # Evaluate feature 1
-        eml_arg_x1 = layer.a[0, 1, 0] * x_eval.squeeze() + layer.b[0, 1, 0]
-        eml_arg_y1 = F.softplus(layer.c[0, 1, 0] * x_eval.squeeze() + layer.d[0, 1, 0]) + layer.eps
-        y_eml_f1 = (torch.exp(eml_arg_x1) - torch.log(eml_arg_y1)).numpy()
+        y_rbf = get_rbf_edge_y(rbf_kan.layers[1], 0, j, x_eval.squeeze())
+        y_eml = get_eml_edge_y(eml_kan.layers[1], 0, j, x_eval.squeeze())
         
-    # 5. Plotting Comparison of the Learned Curves
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6), dpi=150)
-    
-    # Left Panel: Feature 1 Edge Curve
-    axes[0].plot(x_test_range, y_gt, color='#0F172A', linestyle='--', linewidth=2.5, label='Ground Truth Target')
-    axes[0].plot(x_test_range, y_rbf_f0, color='#E11D48', linewidth=2.0, label='Learned Standard RBF-KAN')
-    axes[0].plot(x_test_range, y_eml_f0, color='#7C3AED', linewidth=2.0, label='Learned EML-KAN')
-    axes[0].set_title("Edge 0 (Input $x_1 \\rightarrow$ Output $y_1$)\nLearned Univariate Function $\\phi_1(x_1)$", fontsize=12, fontweight='bold')
-    axes[0].set_xlabel("Input Activation $x_1$", fontsize=10)
-    axes[0].set_ylabel("Edge Output $\\phi(x_1)$", fontsize=10)
-    axes[0].grid(True, linestyle="--", alpha=0.5)
-    axes[0].legend(loc="upper left")
-    
-    # Right Panel: Feature 2 Edge Curve
-    axes[1].plot(x_test_range, y_gt, color='#0F172A', linestyle='--', linewidth=2.5, label='Ground Truth Target')
-    axes[1].plot(x_test_range, y_rbf_f1, color='#E11D48', linewidth=2.0, label='Learned Standard RBF-KAN')
-    axes[1].plot(x_test_range, y_eml_f1, color='#7C3AED', linewidth=2.0, label='Learned EML-KAN')
-    axes[1].set_title("Edge 1 (Input $x_2 \\rightarrow$ Output $y_1$)\nLearned Univariate Function $\\phi_2(x_2)$", fontsize=12, fontweight='bold')
-    axes[1].set_xlabel("Input Activation $x_2$", fontsize=10)
-    axes[1].set_ylabel("Edge Output $\\phi(x_2)$", fontsize=10)
-    axes[1].grid(True, linestyle="--", alpha=0.5)
-    axes[1].legend(loc="upper left")
-    
-    plt.suptitle("Empirical Comparison of Trained KAN Edge Curves: Splines vs. EML Basis", fontsize=15, fontweight='bold', color='#0F172A', y=1.0)
+        ax.plot(x_test_range, y_rbf, color='#E11D48', linewidth=2.0, label='Standard RBF-KAN')
+        ax.plot(x_test_range, y_eml, color='#7C3AED', linewidth=2.0, label='EML-KAN')
+        ax.set_title(f"Edge {edge_idx}: Hidden $h_{j+1} \\rightarrow$ Output $y_1$", fontsize=10, fontweight='bold')
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend(loc="upper left", fontsize=8)
+        edge_idx += 1
+        
+    plt.suptitle("Grid Comparison of All 18 Learned Edge Curves on the Complex Math Function", fontsize=15, fontweight='bold', color='#0F172A', y=0.99)
     
     dest_path = os.path.join(os.path.dirname(__file__), "trained_curves_comparison.png")
     plt.savefig(dest_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"Trained curves plot successfully saved to: {dest_path}")
+    print(f"All 18 edge curves successfully generated and saved to: {dest_path}")
 
 if __name__ == "__main__":
     main()
