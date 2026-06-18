@@ -59,10 +59,15 @@ The project is structured experiment-wise to keep the code, generated visual pro
 │   ├── README.md                             # EML-KAN mathematical background and results summary
 │   ├── COMPARISON_AND_METRICS.md             # Parameter complexity, symbolic equations, and schematic comparison
 │   ├── kan_comparison.png                    # Architectural diagram (Spline KAN vs. EML-KAN)
+│   ├── kan_network_edges_comparison.png      # Curves plotted directly on network edges schematic
+│   ├── trained_curves_comparison.png         # Comparison of actually trained edge curves
 │   ├── eml_network.py                        # EMLKANLayer and EMLKAN model architectures
 │   ├── complex_data_experiment.py            # Target function recovery (achieving Loss = 0.0)
 │   ├── real_world_experiment.py              # Wine dataset training (achieving 100.00% Test Accuracy)
-│   └── symbolic_regression.py                # Symbolic parameter recovery & function formulation
+│   ├── symbolic_regression.py                # Symbolic parameter recovery & function formulation
+│   ├── plot_kan_comparison.py                # Script to plot architectural comparison diagram
+│   ├── plot_network_edges_comparison.py      # Script to plot network graph schematic
+│   └── plot_trained_curves.py                # Script to train models and plot learned curves
 │
 ├── reports/                                  # Project reports & analyses
 │   ├── KAN_CROSS_ATTENTION_FORMULA.md        # KAN-wise summation notation of cross-attention

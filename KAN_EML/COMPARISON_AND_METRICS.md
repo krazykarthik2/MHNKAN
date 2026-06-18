@@ -68,3 +68,8 @@ The graphic below highlights the structural difference on each connection edge b
 Below is the complete network representation ($[2, 3, 1]$ structure) illustrating how the univariate function curves reside directly on the connecting edges:
 
 ![Network Nodes and Curves Comparison](kan_network_edges_comparison.png)
+
+### 3. Empirical Comparison of Actually Trained Edge Curves
+Below is the plot showing the **exact real values** of the univariate curves learned on the edges of the networks after training on the target function:
+
+![Trained Edge Curves Comparison](trained_curves_comparison.png)

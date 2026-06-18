@@ -77,4 +77,7 @@ python KAN_EML/real_world_experiment.py
 
 # Run the symbolic regression parameter recovery proof
 python KAN_EML/symbolic_regression.py
+
+# Run the comparative trained curves experiment and generate plot
+python KAN_EML/plot_trained_curves.py
 ```
