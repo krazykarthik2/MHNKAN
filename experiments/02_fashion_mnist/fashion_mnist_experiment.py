@@ -1,4 +1,10 @@
 import os
+import sys
+# Injected path for root and core imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../core')))
+
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
