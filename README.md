@@ -56,6 +56,7 @@ The project is structured experiment-wise to keep the code, generated visual pro
 │       └── genomic_reconstruction.png        # Nucleotide sequence reconstruction alignment plot
 │
 ├── reports/                                  # Project reports & analyses
+│   ├── KAN_CROSS_ATTENTION_FORMULA.md        # KAN-wise summation notation of cross-attention
 │   ├── COMPARATIVE_METRICS.md                # FLOPs, parameters, and time complexity table
 │   ├── SCALING_LAWS.md                       # Scaling behavior with respect to dimension and memory count
 │   ├── cross_attention_normal.md             # Sequence length scaling logic of MHNs
