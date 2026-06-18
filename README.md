@@ -38,6 +38,9 @@ The project is structured experiment-wise to keep the code, generated visual pro
 │   │   └── basin_attraction.png              # Basin boundary phase transition plot
 │   │
 │   ├── 04_hybrid_sparse_cross_attn/          # Sparse KAN and cross-attention hybrid
+│   │   ├── plot_network_mechanics.py         # Visualizes routing, pruning, and curve-fitting
+│   │   ├── UNIFIED_NETWORK_MECHANICS.md      # Detailed mechanics walkthrough report
+│   │   ├── unified_network_mechanics.png     # Generated mechanics dashboard plot
 │   │   ├── PROOF_and_ALL_comparison.md       # Sparsity vs. normal cross-attention comparison
 │   │   └── sparse_cross_attn_reconstruction.png # Hybrid network inpainting results
 │   │
@@ -100,6 +103,11 @@ The project is structured experiment-wise to keep the code, generated visual pro
 * **Script:** [basin_proof.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/03_basin_of_attraction/basin_proof.py)
 * **Behavior:** Proves that KAN-Hopfield stores stable, isolated attractor basins. Query interpolation between two targets exhibits an exact step-function phase transition at $\alpha = 0.5$.
 * **Details:** [BASIN_OF_ATTRACTION.md](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/03_basin_of_attraction/BASIN_OF_ATTRACTION.md)
+
+### 5. Unified Mechanics Dashboard (Cross-Attention, Sparsity, Symbolic regression)
+* **Script:** [plot_network_mechanics.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/04_hybrid_sparse_cross_attn/plot_network_mechanics.py)
+* **Behavior:** Demonstrates routing metrics from GUE genomic sequences, L1 sparsity edge patterns, and symbolic regression curve fitting using real data.
+* **Details:** [UNIFIED_NETWORK_MECHANICS.md](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/04_hybrid_sparse_cross_attn/UNIFIED_NETWORK_MECHANICS.md)
 
 ---
 
