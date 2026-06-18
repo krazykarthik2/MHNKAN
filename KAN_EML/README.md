@@ -51,6 +51,14 @@ This allows the network to natively learn complex non-linear mathematical relati
   * **Epoch 150:** Train Loss: `0.0000`, Test Acc: **`100.00%`**
   * **Final Test Accuracy:** **`100.00%`** (perfect classification generalization).
 
+### 3. Symbolic Parameter Recovery & Mathematical Formulation (`symbolic_regression.py`)
+* **Task:** Extract the converged parameter values of the EML-KAN model and print the recovered symbolic mathematical formula.
+* **Result:** The network successfully recovered the target EML function with $3.3 \times 10^{-13}$ MSE validation loss.
+* **Recovered KAN+EML Symbolic Function:**
+  \[
+  y = \left[ \exp(1.200077 \cdot x_1 - 0.300178) - \ln\left(\text{softplus}(0.800115 \cdot x_1 + 0.201382) + 1\text{e-}6\right) \right] + \left[ \exp(1.199920 \cdot x_2 - 0.299816) - \ln\left(\text{softplus}(0.799889 \cdot x_2 + 0.198624) + 1\text{e-}6\right) \right]
+  \]
+
 ---
 
 ## 🚀 How to Run the Experiments
@@ -63,4 +71,7 @@ python KAN_EML/complex_data_experiment.py
 
 # Run the Wine dataset classification experiment
 python KAN_EML/real_world_experiment.py
+
+# Run the symbolic regression parameter recovery proof
+python KAN_EML/symbolic_regression.py
 ```

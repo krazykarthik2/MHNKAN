@@ -59,7 +59,8 @@ The project is structured experiment-wise to keep the code, generated visual pro
 │   ├── README.md                             # EML-KAN mathematical background and results summary
 │   ├── eml_network.py                        # EMLKANLayer and EMLKAN model architectures
 │   ├── complex_data_experiment.py            # Target function recovery (achieving Loss = 0.0)
-│   └── real_world_experiment.py              # Wine dataset training (achieving 100.00% Test Accuracy)
+│   ├── real_world_experiment.py              # Wine dataset training (achieving 100.00% Test Accuracy)
+│   └── symbolic_regression.py                # Symbolic parameter recovery & function formulation
 │
 ├── reports/                                  # Project reports & analyses
 │   ├── KAN_CROSS_ATTENTION_FORMULA.md        # KAN-wise summation notation of cross-attention
