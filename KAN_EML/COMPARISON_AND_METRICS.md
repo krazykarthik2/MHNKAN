@@ -57,8 +57,14 @@ y_{\text{learned}} = \left[ \exp(1.200077 \cdot x_1 - 0.300178) - \ln\left(\text
 
 ---
 
-## 🖼️ Architectural Schematic Visual
+## 🖼️ Architectural Schematic Visuals
 
+### 1. Connection Edge Detail Comparison
 The graphic below highlights the structural difference on each connection edge between a Standard KAN (grid splines) and the EML-KAN (analytic primitive):
 
 ![Architecture Comparison](kan_comparison.png)
+
+### 2. Full Network Node & Edge Curve Graph Layout
+Below is the complete network representation ($[2, 3, 1]$ structure) illustrating how the univariate function curves reside directly on the connecting edges:
+
+![Network Nodes and Curves Comparison](kan_network_edges_comparison.png)
