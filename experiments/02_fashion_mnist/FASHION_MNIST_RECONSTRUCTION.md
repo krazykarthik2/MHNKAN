@@ -35,4 +35,4 @@ We trained an empirical multi-layer RBF-KAN `[784 -> 16 -> 784]` using gradient 
 
 The following generated plot displays the original prototype templates, the corrupted noisy input queries, the analytical Hopfield/MHN reconstructions, and the trained RBF-KAN outputs:
 
-![Fashion MNIST Reconstruction Result](C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/fashion_mnist_reconstruction.png)
+![Fashion MNIST Reconstruction Result](fashion_mnist_reconstruction.png)

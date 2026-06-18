@@ -49,5 +49,5 @@ We do not need to binarize or threshold images to get exact MSE = 0.0. The KAN-H
 
 The following generated plot displays the original continuous templates, the noisy continuous input queries, and the exact reconstructions from both standard MHN and Analytical KAN:
 
-![Continuous Real-Valued Reconstruction Proof](C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/continuous_real_reconstruction.png)
+![Continuous Real-Valued Reconstruction Proof](continuous_real_reconstruction.png)
 

@@ -41,4 +41,4 @@ Rec KAN:   GCTAGCTCATCTTGCGGCTGGGCGGGGCCCAGGACTGCTGCTGCTGACCGCCTTGATAGGCTACACCGT
 
 Below is the visualization saved during execution showing the sequence alignment and reconstruction status:
 
-![Genomic Reconstruction Proof](./genomic_reconstruction.png)
+![Genomic Reconstruction Proof](genomic_reconstruction.png)

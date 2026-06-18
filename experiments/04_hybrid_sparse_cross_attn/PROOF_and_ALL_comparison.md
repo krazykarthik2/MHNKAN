@@ -31,4 +31,4 @@ By running **Iterative Routing Loops** ($3$ recursive steps):
 
 The following generated plot displays the original binarized templates, the 50% bottom-erased input queries, the standard `cross_attn_normal` reconstructions, and our `SparseCrossAttentionKAN` reconstructions:
 
-![Sparse Cross-Attention KAN Reconstruction](C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/sparse_cross_attn_reconstruction.png)
+![Sparse Cross-Attention KAN Reconstruction](sparse_cross_attn_reconstruction.png)

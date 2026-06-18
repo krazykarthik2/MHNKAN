@@ -36,4 +36,4 @@ The numerical results verify this:
 
 The following generated plot displays the binarized distance (reconstruction error) of the retrieved memory to both templates as a function of the interpolation coefficient $\alpha$:
 
-![Basins of Attraction Separation](C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/basin_attraction.png)
+![Basins of Attraction Separation](basin_attraction.png)

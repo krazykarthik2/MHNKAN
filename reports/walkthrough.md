@@ -10,10 +10,10 @@ The diagrams below illustrate:
 2. The specific computational graph of our `AnalyticalHopfieldKAN` which achieves exact **MSE = 0.0** retrieval.
 
 ### General KAN Graph
-![KAN Network Graph](C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/kan_network_visualization.png)
+![KAN Network Graph](../experiments/01_binary_memorization/kan_network_visualization.png)
 
 ### Exact Hopfield-KAN Computation Graph (MSE = 0)
-![Hopfield KAN Graph](C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/hopfield_kan_exact_graph.png)
+![Hopfield KAN Graph](../experiments/01_binary_memorization/hopfield_kan_exact_graph.png)
 
 ---
 
