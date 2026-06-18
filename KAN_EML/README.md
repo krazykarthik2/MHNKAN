@@ -59,6 +59,9 @@ This allows the network to natively learn complex non-linear mathematical relati
   y = \left[ \exp(1.200077 \cdot x_1 - 0.300178) - \ln\left(\text{softplus}(0.800115 \cdot x_1 + 0.201382) + 1\text{e-}6\right) \right] + \left[ \exp(1.199920 \cdot x_2 - 0.299816) - \ln\left(\text{softplus}(0.799889 \cdot x_2 + 0.198624) + 1\text{e-}6\right) \right]
   \]
 
+### 4. Architectural Comparison & Parameter Scaling
+A detailed comparative analysis (including parameter counts, formulas, and structural comparison visual) is documented in [COMPARISON_AND_METRICS.md](COMPARISON_AND_METRICS.md).
+
 ---
 
 ## 🚀 How to Run the Experiments

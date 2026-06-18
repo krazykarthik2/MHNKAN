@@ -57,6 +57,8 @@ The project is structured experiment-wise to keep the code, generated visual pro
 │
 ├── KAN_EML/                                  # KAN enhanced with the Exp-Minus-Log (EML) operator
 │   ├── README.md                             # EML-KAN mathematical background and results summary
+│   ├── COMPARISON_AND_METRICS.md             # Parameter complexity, symbolic equations, and schematic comparison
+│   ├── kan_comparison.png                    # Architectural diagram (Spline KAN vs. EML-KAN)
 │   ├── eml_network.py                        # EMLKANLayer and EMLKAN model architectures
 │   ├── complex_data_experiment.py            # Target function recovery (achieving Loss = 0.0)
 │   ├── real_world_experiment.py              # Wine dataset training (achieving 100.00% Test Accuracy)
