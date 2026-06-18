@@ -59,7 +59,13 @@ This allows the network to natively learn complex non-linear mathematical relati
   y = \left[ \exp(1.200077 \cdot x_1 - 0.300178) - \ln\left(\text{softplus}(0.800115 \cdot x_1 + 0.201382) + 1\text{e-}6\right) \right] + \left[ \exp(1.199920 \cdot x_2 - 0.299816) - \ln\left(\text{softplus}(0.799889 \cdot x_2 + 0.198624) + 1\text{e-}6\right) \right]
   \]
 
-### 4. Architectural Comparison & Parameter Scaling
+### 4. Image Coordinate Regression & Portrait Reconstruction (`fit_image_experiment.py`)
+* **Task:** Fit the mapping $f(x, y) \rightarrow (R, G, B)$ for the pixels of a stylized Rick Astley portrait.
+* **Method:** Used a `ResidualEMLKAN` (with skip connections), layer-wise learning rates (slower for inner arguments, faster for outer weights), and AdamW + L-BFGS optimization.
+* **Result:** Reconstructed the portrait image with a final MSE loss of **`0.03598063`**.
+* **Saved Outputs:** `rick_roll_target.png` and `rick_roll_reconstructed.png`.
+
+### 5. Architectural Comparison & Parameter Scaling
 A detailed comparative analysis (including parameter counts, formulas, and structural comparison visual) is documented in [COMPARISON_AND_METRICS.md](COMPARISON_AND_METRICS.md).
 
 ---
@@ -80,4 +86,7 @@ python KAN_EML/symbolic_regression.py
 
 # Run the comparative trained curves experiment and generate plot
 python KAN_EML/plot_trained_curves.py
+
+# Run the Rick Astley portrait regression experiment
+python KAN_EML/fit_image_experiment.py
 ```

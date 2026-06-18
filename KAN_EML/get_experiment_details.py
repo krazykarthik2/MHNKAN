@@ -44,12 +44,15 @@ def main():
             layer.weight_eml.requires_grad = False
             
     optimizer_eml = optim.AdamW(eml_kan.parameters(), lr=0.015)
-    for epoch in range(1, 1500):
+    # Increase training epochs to 8000 for full convergence
+    for epoch in range(1, 8001):
         eml_kan.train()
         optimizer_eml.zero_grad()
         loss = F.mse_loss(eml_kan(X_train), y_train)
         loss.backward()
         optimizer_eml.step()
+        if epoch % 1000 == 0:
+            print(f"  EML-KAN Adam Epoch {epoch} | Loss: {loss.item():.10f}")
         
     optimizer_lbfgs = optim.LBFGS(eml_kan.parameters(), lr=0.5, max_iter=200)
     def closure():
