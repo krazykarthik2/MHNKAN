@@ -2,6 +2,7 @@ import os
 import time
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
@@ -16,13 +17,13 @@ class EMLKANActivation(nn.Module):
         self.num_components = num_components
         
         # EML activation parameters for each channel
-        self.a = nn.Parameter(torch.randn(channels, num_components) * 0.1)
+        self.a = nn.Parameter(torch.randn(channels, num_components) * 0.01)
         self.b = nn.Parameter(torch.zeros(channels, num_components))
-        self.c = nn.Parameter(torch.randn(channels, num_components) * 0.1)
+        self.c = nn.Parameter(torch.randn(channels, num_components) * 0.01)
         self.d = nn.Parameter(torch.zeros(channels, num_components))
         
         self.weight_base = nn.Parameter(torch.ones(channels) * 0.1)
-        self.weight_eml = nn.Parameter(torch.randn(channels, num_components) * 0.1)
+        self.weight_eml = nn.Parameter(torch.randn(channels, num_components) * 0.01)
 
     def forward(self, x):
         # x shape: [Batch, Channels, H, W] or [Batch, Channels]
@@ -33,8 +34,12 @@ class EMLKANActivation(nn.Module):
             
         out = self.weight_base * x
         for k in range(self.num_components):
-            arg_x = self.a[:, k] * x + self.b[:, k]
-            arg_y = torch.log(1.0 + torch.exp(self.c[:, k] * x + self.d[:, k])) + 1e-6
+            # Clamp exponential argument to prevent float overflow to inf/nan
+            arg_x = torch.clamp(self.a[:, k] * x + self.b[:, k], min=-10.0, max=10.0)
+            
+            # Use stable softplus to prevent log(1 + exp(z)) overflow
+            arg_y = F.softplus(self.c[:, k] * x + self.d[:, k]) + 1e-6
+            
             out = out + self.weight_eml[:, k] * (torch.exp(arg_x) - torch.log(arg_y))
             
         if is_4d:
