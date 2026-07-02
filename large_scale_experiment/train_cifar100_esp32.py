@@ -84,6 +84,11 @@ class EMLKANCifar100(nn.Module):
 def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
     print(f"Generating ESP32 inference header at {filepath}...")
     
+    # Automatically create parent directories if specified
+    dir_name = os.path.dirname(filepath)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+        
     # Extract weights
     conv1 = model.features[0].conv.weight.data.numpy()
     act1 = model.features[0].act
