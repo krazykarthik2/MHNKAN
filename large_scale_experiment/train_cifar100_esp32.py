@@ -88,14 +88,20 @@ class EMLKANActivation(nn.Module):
         self.weight_eml = nn.Parameter(torch.randn(channels, num_components) * 0.01)
 
     def forward(self, x):
+        # x shape: [Batch, Channels, H, W] or [Batch, Channels]
         is_4d = len(x.shape) == 4
         if is_4d:
+            # Transpose to align channels for parameter mapping
             x = x.permute(0, 2, 3, 1) # [B, H, W, C]
             
         out = self.weight_base * x
         for k in range(self.num_components):
+            # Clamp exponential argument to prevent float overflow to inf/nan
             arg_x = torch.clamp(self.a[:, k] * x + self.b[:, k], min=-10.0, max=10.0)
+            
+            # Use stable softplus to prevent log(1 + exp(z)) overflow
             arg_y = F.softplus(self.c[:, k] * x + self.d[:, k]) + 1e-6
+            
             out = out + self.weight_eml[:, k] * (torch.exp(arg_x) - torch.log(arg_y))
             
         if is_4d:
@@ -121,22 +127,45 @@ class EMLKANLinear(nn.Module):
     def forward(self, x):
         return self.act(self.linear(x))
 
-# 3. Complete EML-KAN CIFAR-100 Classifier Architecture
+class EMLKANResidualBlock(nn.Module):
+    """
+    Compact EML-KAN Residual Block with Skip Connection.
+    Bypasses input to output: x = x + conv2(conv1(x))
+    """
+    def __init__(self, channels, num_components=2):
+        super().__init__()
+        self.conv1 = EMLKANConv2d(channels, channels, kernel_size=3, padding=1, num_components=num_components)
+        self.conv2 = EMLKANConv2d(channels, channels, kernel_size=3, padding=1, num_components=num_components)
+        
+    def forward(self, x):
+        return x + self.conv2(self.conv1(x))
+
+# 3. Complete EML-KAN CIFAR-100 ResNet Classifier Architecture
 
 class EMLKANCifar100(nn.Module):
     def __init__(self, num_components=2):
         super().__init__()
-        self.features = nn.Sequential(
-            EMLKANConv2d(3, 32, kernel_size=3, padding=1, num_components=num_components),
-            nn.MaxPool2d(2, 2), # 16x16
-            EMLKANConv2d(32, 64, kernel_size=3, padding=1, num_components=num_components),
-            nn.MaxPool2d(2, 2), # 8x8
-            nn.AdaptiveAvgPool2d((1, 1)) # 1x1x64
-        )
+        self.conv1 = EMLKANConv2d(3, 32, kernel_size=3, padding=1, num_components=num_components)
+        self.res1 = EMLKANResidualBlock(32, num_components=num_components)
+        self.pool1 = nn.MaxPool2d(2, 2) # 16x16
+        
+        self.conv2 = EMLKANConv2d(32, 64, kernel_size=3, padding=1, num_components=num_components)
+        self.res2 = EMLKANResidualBlock(64, num_components=num_components)
+        self.pool2 = nn.MaxPool2d(2, 2) # 8x8
+        
+        self.gap = nn.AdaptiveAvgPool2d((1, 1))
         self.classifier = EMLKANLinear(64, 100, num_components=num_components)
 
     def forward(self, x):
-        x = self.features(x)
+        x = self.conv1(x)
+        x = self.res1(x)
+        x = self.pool1(x)
+        
+        x = self.conv2(x)
+        x = self.res2(x)
+        x = self.pool2(x)
+        
+        x = self.gap(x)
         x = torch.flatten(x, 1)
         x = self.classifier(x)
         return x
@@ -150,26 +179,6 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
     if dir_name:
         os.makedirs(dir_name, exist_ok=True)
         
-    conv1 = model.features[0].conv.weight.data.numpy()
-    bn1 = model.features[0].bn
-    mean1 = bn1.running_mean.data.numpy()
-    var1 = bn1.running_var.data.numpy()
-    weight1 = bn1.weight.data.numpy()
-    bias1 = bn1.bias.data.numpy()
-    scale1 = weight1 / np.sqrt(var1 + bn1.eps)
-    offset1 = bias1 - mean1 * scale1
-    act1 = model.features[0].act
-    
-    conv2 = model.features[2].conv.weight.data.numpy()
-    bn2 = model.features[2].bn
-    mean2 = bn2.running_mean.data.numpy()
-    var2 = bn2.running_var.data.numpy()
-    weight2 = bn2.weight.data.numpy()
-    bias2 = bn2.bias.data.numpy()
-    scale2 = weight2 / np.sqrt(var2 + bn2.eps)
-    offset2 = bias2 - mean2 * scale2
-    act2 = model.features[2].act
-    
     fc = model.classifier.linear.weight.data.numpy()
     act3 = model.classifier.act
     
@@ -194,26 +203,37 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
                     f.write("\n    ")
             f.write("\n};\n\n")
             
-        write_array("CONV1_WEIGHTS", conv1)
-        write_array("BN1_SCALE", scale1)
-        write_array("BN1_OFFSET", offset1)
-        write_array("ACT1_A", act1.a.data.numpy())
-        write_array("ACT1_B", act1.b.data.numpy())
-        write_array("ACT1_C", act1.c.data.numpy())
-        write_array("ACT1_D", act1.d.data.numpy())
-        write_array("ACT1_W_BASE", act1.weight_base.data.numpy())
-        write_array("ACT1_W_EML", act1.weight_eml.data.numpy())
+        def write_conv_bn_act(name_prefix, layer):
+            conv = layer.conv.weight.data.numpy()
+            bn = layer.bn
+            mean = bn.running_mean.data.numpy()
+            var = bn.running_var.data.numpy()
+            weight = bn.weight.data.numpy()
+            bias = bn.bias.data.numpy()
+            scale = weight / np.sqrt(var + bn.eps)
+            offset = bias - mean * scale
+            act = layer.act
+            
+            write_array(f"{name_prefix}_WEIGHTS", conv)
+            write_array(f"{name_prefix}_BN_SCALE", scale)
+            write_array(f"{name_prefix}_BN_OFFSET", offset)
+            write_array(f"{name_prefix}_ACT_A", act.a.data.numpy())
+            write_array(f"{name_prefix}_ACT_B", act.b.data.numpy())
+            write_array(f"{name_prefix}_ACT_C", act.c.data.numpy())
+            write_array(f"{name_prefix}_ACT_D", act.d.data.numpy())
+            write_array(f"{name_prefix}_ACT_W_BASE", act.weight_base.data.numpy())
+            write_array(f"{name_prefix}_ACT_W_EML", act.weight_eml.data.numpy())
+            
+        # Export Conv Layers & Residual Blocks
+        write_conv_bn_act("CONV1", model.conv1)
+        write_conv_bn_act("RES1_CONV1", model.res1.conv1)
+        write_conv_bn_act("RES1_CONV2", model.res1.conv2)
         
-        write_array("CONV2_WEIGHTS", conv2)
-        write_array("BN2_SCALE", scale2)
-        write_array("BN2_OFFSET", offset2)
-        write_array("ACT2_A", act2.a.data.numpy())
-        write_array("ACT2_B", act2.b.data.numpy())
-        write_array("ACT2_C", act2.c.data.numpy())
-        write_array("ACT2_D", act2.d.data.numpy())
-        write_array("ACT2_W_BASE", act2.weight_base.data.numpy())
-        write_array("ACT2_W_EML", act2.weight_eml.data.numpy())
+        write_conv_bn_act("CONV2", model.conv2)
+        write_conv_bn_act("RES2_CONV1", model.res2.conv1)
+        write_conv_bn_act("RES2_CONV2", model.res2.conv2)
         
+        # FC Weights
         write_array("FC_WEIGHTS", fc)
         write_array("ACT3_A", act3.a.data.numpy())
         write_array("ACT3_B", act3.b.data.numpy())
@@ -253,7 +273,6 @@ def main():
     model = EMLKANCifar100().to(device)
     criterion = nn.CrossEntropyLoss()
     
-    # Split parameters: 2D (Muon) and 1D (AdamW)
     params_2d = []
     params_1d = []
     for name, p in model.named_parameters():
@@ -263,11 +282,9 @@ def main():
             else:
                 params_1d.append(p)
                 
-    # Optimize using Muon for structural matrices and AdamW for 1D weights
     opt_muon = Muon(params_2d, lr=0.03, momentum=0.9, ns_steps=3)
     opt_adam = optim.AdamW(params_1d, lr=0.003, weight_decay=1e-4)
     
-    # Cosine Annealing Schedulers for 100 epochs
     scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=100)
     scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=100)
     
