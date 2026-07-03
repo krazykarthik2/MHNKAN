@@ -71,13 +71,13 @@ class EMLKANCifar100(nn.Module):
     def __init__(self, num_components=2):
         super().__init__()
         self.features = nn.Sequential(
-            EMLKANConv2d(3, 16, kernel_size=3, padding=1, num_components=num_components),
+            EMLKANConv2d(3, 32, kernel_size=3, padding=1, num_components=num_components),
             nn.MaxPool2d(2, 2), # 16x16
-            EMLKANConv2d(16, 32, kernel_size=3, padding=1, num_components=num_components),
+            EMLKANConv2d(32, 64, kernel_size=3, padding=1, num_components=num_components),
             nn.MaxPool2d(2, 2), # 8x8
-            nn.AdaptiveAvgPool2d((1, 1)) # 1x1x32
+            nn.AdaptiveAvgPool2d((1, 1)) # 1x1x64
         )
-        self.classifier = EMLKANLinear(32, 100, num_components=num_components)
+        self.classifier = EMLKANLinear(64, 100, num_components=num_components)
 
     def forward(self, x):
         x = self.features(x)
@@ -204,8 +204,8 @@ def main():
     model = EMLKANCifar100().to(device)
     criterion = nn.CrossEntropyLoss()
     
-    # Lower initial learning rate to stabilize gradients
-    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=5e-4)
+    # Set initial learning rate to 0.003 for improved gradient exploration
+    optimizer = optim.AdamW(model.parameters(), lr=0.003, weight_decay=5e-4)
     
     # Cosine Annealing Learning Rate Scheduler for 100 epochs
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
