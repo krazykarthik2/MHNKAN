@@ -267,12 +267,12 @@ def main():
     opt_muon = Muon(params_2d, lr=0.03, momentum=0.9, ns_steps=3)
     opt_adam = optim.AdamW(params_1d, lr=0.003, weight_decay=1e-4)
     
-    # Cosine Annealing Schedulers for 40 epochs
-    scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=40)
-    scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=40)
+    # Cosine Annealing Schedulers for 100 epochs
+    scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=100)
+    scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=100)
     
-    print("Starting training with Muon + AdamW (40 epochs)...")
-    for epoch in range(40):
+    print("Starting training with Muon + AdamW (100 epochs)...")
+    for epoch in range(100):
         model.train()
         running_loss = 0.0
         correct = 0
@@ -304,8 +304,8 @@ def main():
         scheduler_adam.step()
         
         acc = 100.0 * correct / total
-        if (epoch + 1) % 5 == 0 or epoch == 0:
-            print(f"Epoch {epoch+1}/40 | Loss: {running_loss/len(trainloader):.4f} | Accuracy: {acc:.2f}% | Muon LR: {scheduler_muon.get_last_lr()[0]:.6f}")
+        if (epoch + 1) % 10 == 0 or epoch == 0:
+            print(f"Epoch {epoch+1}/100 | Loss: {running_loss/len(trainloader):.4f} | Accuracy: {acc:.2f}% | Muon LR: {scheduler_muon.get_last_lr()[0]:.6f}")
         
     model.eval()
     test_correct = 0
@@ -318,7 +318,7 @@ def main():
             test_total += targets.size(0)
             test_correct += predicted.eq(targets).sum().item()
             
-    print(f"Test Accuracy after 40 epochs: {100.0 * test_correct / test_total:.2f}%")
+    print(f"Test Accuracy after 100 epochs: {100.0 * test_correct / test_total:.2f}%")
     
     with torch.no_grad():
         for name, param in model.named_parameters():
