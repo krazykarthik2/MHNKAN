@@ -11,7 +11,6 @@ import numpy as np
 # 1. Define Muon Optimizer helper
 
 def newton_schulz5(G, steps=3):
-    # Newton-Schulz iteration for orthogonalization (steps=3 is fast and accurate)
     a, b = G.shape
     X = G / (G.norm() + 1e-7)
     if a > b:
@@ -25,10 +24,6 @@ def newton_schulz5(G, steps=3):
     return X
 
 class Muon(optim.Optimizer):
-    """
-    Muon optimizer: Multi-variate orthogonalization optimizer.
-    Applies standard momentum followed by Newton-Schulz orthogonalization on 2D parameters.
-    """
     def __init__(self, params, lr=0.02, momentum=0.9, ns_steps=3):
         defaults = dict(lr=lr, momentum=momentum, ns_steps=ns_steps)
         super().__init__(params, defaults)
@@ -57,15 +52,11 @@ class Muon(optim.Optimizer):
                 buf = state['momentum_buffer']
                 buf.mul_(momentum).add_(grad)
                 
-                # Reshape N-D tensor to 2D matrix
                 shape = p.shape
                 flat_p = p.view(shape[0], -1)
                 flat_buf = buf.view(shape[0], -1)
                 
-                # Apply Newton-Schulz orthogonal step
                 u = newton_schulz5(flat_buf, steps=ns_steps)
-                
-                # Update weights
                 p.add_(u.view(shape), alpha=-lr)
                 
         return loss
@@ -78,7 +69,6 @@ class EMLKANActivation(nn.Module):
         self.channels = channels
         self.num_components = num_components
         
-        # EML activation parameters for each channel
         self.a = nn.Parameter(torch.randn(channels, num_components) * 0.01)
         self.b = nn.Parameter(torch.zeros(channels, num_components))
         self.c = nn.Parameter(torch.randn(channels, num_components) * 0.01)
@@ -88,20 +78,14 @@ class EMLKANActivation(nn.Module):
         self.weight_eml = nn.Parameter(torch.randn(channels, num_components) * 0.01)
 
     def forward(self, x):
-        # x shape: [Batch, Channels, H, W] or [Batch, Channels]
         is_4d = len(x.shape) == 4
         if is_4d:
-            # Transpose to align channels for parameter mapping
             x = x.permute(0, 2, 3, 1) # [B, H, W, C]
             
         out = self.weight_base * x
         for k in range(self.num_components):
-            # Clamp exponential argument to prevent float overflow to inf/nan
             arg_x = torch.clamp(self.a[:, k] * x + self.b[:, k], min=-10.0, max=10.0)
-            
-            # Use stable softplus to prevent log(1 + exp(z)) overflow
             arg_y = F.softplus(self.c[:, k] * x + self.d[:, k]) + 1e-6
-            
             out = out + self.weight_eml[:, k] * (torch.exp(arg_x) - torch.log(arg_y))
             
         if is_4d:
@@ -127,52 +111,22 @@ class EMLKANLinear(nn.Module):
     def forward(self, x):
         return self.act(self.linear(x))
 
-class EMLKANResidualBlock(nn.Module):
-    """
-    Compact EML-KAN Residual Block with Skip Connection.
-    Bypasses input to output: x = x + conv2(conv1(x))
-    Zero-initialized to act as a perfect identity mapping at epoch 0.
-    """
-    def __init__(self, channels, num_components=2):
-        super().__init__()
-        self.conv1 = EMLKANConv2d(channels, channels, kernel_size=3, padding=1, num_components=num_components)
-        self.conv2 = EMLKANConv2d(channels, channels, kernel_size=3, padding=1, num_components=num_components)
-        
-        # Zero-initialize second conv/act weights to start as perfect identity mapping
-        with torch.no_grad():
-            self.conv2.conv.weight.zero_()
-            self.conv2.act.weight_base.zero_()
-            self.conv2.act.weight_eml.zero_()
-        
-    def forward(self, x):
-        return x + self.conv2(self.conv1(x))
+# 3. Flexible 2-layer EML-KAN CIFAR Architecture
 
-# 3. Complete EML-KAN CIFAR-100 ResNet Classifier Architecture
-
-class EMLKANCifar100(nn.Module):
-    def __init__(self, num_components=2):
+class EMLKANCifar(nn.Module):
+    def __init__(self, num_classes=10, num_components=2):
         super().__init__()
-        self.conv1 = EMLKANConv2d(3, 32, kernel_size=3, padding=1, num_components=num_components)
-        self.res1 = EMLKANResidualBlock(32, num_components=num_components)
-        self.pool1 = nn.MaxPool2d(2, 2) # 16x16
-        
-        self.conv2 = EMLKANConv2d(32, 64, kernel_size=3, padding=1, num_components=num_components)
-        self.res2 = EMLKANResidualBlock(64, num_components=num_components)
-        self.pool2 = nn.MaxPool2d(2, 2) # 8x8
-        
-        self.gap = nn.AdaptiveAvgPool2d((1, 1))
-        self.classifier = EMLKANLinear(64, 100, num_components=num_components)
+        self.features = nn.Sequential(
+            EMLKANConv2d(3, 32, kernel_size=3, padding=1, num_components=num_components),
+            nn.MaxPool2d(2, 2), # 16x16
+            EMLKANConv2d(32, 64, kernel_size=3, padding=1, num_components=num_components),
+            nn.MaxPool2d(2, 2), # 8x8
+            nn.AdaptiveAvgPool2d((1, 1)) # 1x1x64
+        )
+        self.classifier = EMLKANLinear(64, num_classes, num_components=num_components)
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.res1(x)
-        x = self.pool1(x)
-        
-        x = self.conv2(x)
-        x = self.res2(x)
-        x = self.pool2(x)
-        
-        x = self.gap(x)
+        x = self.features(x)
         x = torch.flatten(x, 1)
         x = self.classifier(x)
         return x
@@ -186,6 +140,26 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
     if dir_name:
         os.makedirs(dir_name, exist_ok=True)
         
+    conv1 = model.features[0].conv.weight.data.numpy()
+    bn1 = model.features[0].bn
+    mean1 = bn1.running_mean.data.numpy()
+    var1 = bn1.running_var.data.numpy()
+    weight1 = bn1.weight.data.numpy()
+    bias1 = bn1.bias.data.numpy()
+    scale1 = weight1 / np.sqrt(var1 + bn1.eps)
+    offset1 = bias1 - mean1 * scale1
+    act1 = model.features[0].act
+    
+    conv2 = model.features[2].conv.weight.data.numpy()
+    bn2 = model.features[2].bn
+    mean2 = bn2.running_mean.data.numpy()
+    var2 = bn2.running_var.data.numpy()
+    weight2 = bn2.weight.data.numpy()
+    bias2 = bn2.bias.data.numpy()
+    scale2 = weight2 / np.sqrt(var2 + bn2.eps)
+    offset2 = bias2 - mean2 * scale2
+    act2 = model.features[2].act
+    
     fc = model.classifier.linear.weight.data.numpy()
     act3 = model.classifier.act
     
@@ -210,37 +184,26 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
                     f.write("\n    ")
             f.write("\n};\n\n")
             
-        def write_conv_bn_act(name_prefix, layer):
-            conv = layer.conv.weight.data.numpy()
-            bn = layer.bn
-            mean = bn.running_mean.data.numpy()
-            var = bn.running_var.data.numpy()
-            weight = bn.weight.data.numpy()
-            bias = bn.bias.data.numpy()
-            scale = weight / np.sqrt(var + bn.eps)
-            offset = bias - mean * scale
-            act = layer.act
-            
-            write_array(f"{name_prefix}_WEIGHTS", conv)
-            write_array(f"{name_prefix}_BN_SCALE", scale)
-            write_array(f"{name_prefix}_BN_OFFSET", offset)
-            write_array(f"{name_prefix}_ACT_A", act.a.data.numpy())
-            write_array(f"{name_prefix}_ACT_B", act.b.data.numpy())
-            write_array(f"{name_prefix}_ACT_C", act.c.data.numpy())
-            write_array(f"{name_prefix}_ACT_D", act.d.data.numpy())
-            write_array(f"{name_prefix}_ACT_W_BASE", act.weight_base.data.numpy())
-            write_array(f"{name_prefix}_ACT_W_EML", act.weight_eml.data.numpy())
-            
-        # Export Conv Layers & Residual Blocks
-        write_conv_bn_act("CONV1", model.conv1)
-        write_conv_bn_act("RES1_CONV1", model.res1.conv1)
-        write_conv_bn_act("RES1_CONV2", model.res1.conv2)
+        write_array("CONV1_WEIGHTS", conv1)
+        write_array("BN1_SCALE", scale1)
+        write_array("BN1_OFFSET", offset1)
+        write_array("ACT1_A", act1.a.data.numpy())
+        write_array("ACT1_B", act1.b.data.numpy())
+        write_array("ACT1_C", act1.c.data.numpy())
+        write_array("ACT1_D", act1.d.data.numpy())
+        write_array("ACT1_W_BASE", act1.weight_base.data.numpy())
+        write_array("ACT1_W_EML", act1.weight_eml.data.numpy())
         
-        write_conv_bn_act("CONV2", model.conv2)
-        write_conv_bn_act("RES2_CONV1", model.res2.conv1)
-        write_conv_bn_act("RES2_CONV2", model.res2.conv2)
+        write_array("CONV2_WEIGHTS", conv2)
+        write_array("BN2_SCALE", scale2)
+        write_array("BN2_OFFSET", offset2)
+        write_array("ACT2_A", act2.a.data.numpy())
+        write_array("ACT2_B", act2.b.data.numpy())
+        write_array("ACT2_C", act2.c.data.numpy())
+        write_array("ACT2_D", act2.d.data.numpy())
+        write_array("ACT2_W_BASE", act2.weight_base.data.numpy())
+        write_array("ACT2_W_EML", act2.weight_eml.data.numpy())
         
-        # FC Weights
         write_array("FC_WEIGHTS", fc)
         write_array("ACT3_A", act3.a.data.numpy())
         write_array("ACT3_B", act3.b.data.numpy())
@@ -270,51 +233,34 @@ def main():
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
-    print("Loading CIFAR-100 dataset...")
-    trainset = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_train)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=2)
+    # ------------------ STAGE 1: CIFAR-10 PRE-TRAINING ------------------
+    print("\n--- STAGE 1: Pre-training on CIFAR-10 (15 epochs) ---")
+    c10_trainset = torchvision.datasets.CIFAR10(root='./data_c10', train=True, download=True, transform=transform_train)
+    c10_trainloader = torch.utils.data.DataLoader(c10_trainset, batch_size=128, shuffle=True, num_workers=2)
     
-    testset = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform_test)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
-    
-    model = EMLKANCifar100().to(device)
+    model = EMLKANCifar(num_classes=10).to(device)
     criterion = nn.CrossEntropyLoss()
     
-    params_2d = []
-    params_1d = []
-    for name, p in model.named_parameters():
-        if p.requires_grad:
-            if p.ndim >= 2:
-                params_2d.append(p)
-            else:
-                params_1d.append(p)
-                
-    opt_muon = Muon(params_2d, lr=0.03, momentum=0.9, ns_steps=3)
+    params_2d = [p for p in model.parameters() if p.ndim >= 2]
+    params_1d = [p for p in model.parameters() if p.ndim < 2]
+    
+    opt_muon = Muon(params_2d, lr=0.03)
     opt_adam = optim.AdamW(params_1d, lr=0.003, weight_decay=1e-4)
     
-    scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=100)
-    scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=100)
+    scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=15)
+    scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=15)
     
-    print("Starting training with Muon + AdamW (100 epochs)...")
-    for epoch in range(100):
+    for epoch in range(15):
         model.train()
         running_loss = 0.0
         correct = 0
         total = 0
-        for batch_idx, (inputs, targets) in enumerate(trainloader):
+        for inputs, targets in c10_trainloader:
             inputs, targets = inputs.to(device), targets.to(device)
             opt_muon.zero_grad()
             opt_adam.zero_grad()
-            
             outputs = model(inputs)
             loss = criterion(outputs, targets)
-            
-            l1_reg = 0.0
-            for name, param in model.named_parameters():
-                if "weight_eml" in name or "weight_base" in name:
-                    l1_reg += torch.sum(torch.abs(param))
-            loss = loss + 1e-5 * l1_reg
-            
             loss.backward()
             opt_muon.step()
             opt_adam.step()
@@ -326,31 +272,83 @@ def main():
             
         scheduler_muon.step()
         scheduler_adam.step()
+        print(f"CIFAR-10 Epoch {epoch+1}/15 | Loss: {running_loss/len(c10_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
         
-        acc = 100.0 * correct / total
-        if (epoch + 1) % 10 == 0 or epoch == 0:
-            print(f"Epoch {epoch+1}/100 | Loss: {running_loss/len(trainloader):.4f} | Accuracy: {acc:.2f}% | Muon LR: {scheduler_muon.get_last_lr()[0]:.6f}")
+    # ------------------ STAGE 2: CIFAR-100 FINE-TUNING ------------------
+    print("\n--- STAGE 2: Transfer Learning to CIFAR-100 (30 epochs) ---")
+    c100_trainset = torchvision.datasets.CIFAR100(root='./data_c100', train=True, download=True, transform=transform_train)
+    c100_trainloader = torch.utils.data.DataLoader(c100_trainset, batch_size=128, shuffle=True, num_workers=2)
+    
+    c100_testset = torchvision.datasets.CIFAR100(root='./data_c100', train=False, download=True, transform=transform_test)
+    c100_testloader = torch.utils.data.DataLoader(c100_testset, batch_size=100, shuffle=False, num_workers=2)
+    
+    # Instantiate CIFAR-100 model and load pre-trained feature weights
+    model_c100 = EMLKANCifar(num_classes=100).to(device)
+    model_c100.features.load_state_dict(model.features.state_dict())
+    
+    params_2d_c100 = [p for p in model_c100.parameters() if p.ndim >= 2]
+    params_1d_c100 = [p for p in model_c100.parameters() if p.ndim < 2]
+    
+    opt_muon_c100 = Muon(params_2d_c100, lr=0.01) # Lower learning rate for fine-tuning
+    opt_adam_c100 = optim.AdamW(params_1d_c100, lr=0.001, weight_decay=1e-4)
+    
+    scheduler_muon_c100 = optim.lr_scheduler.CosineAnnealingLR(opt_muon_c100, T_max=30)
+    scheduler_adam_c100 = optim.lr_scheduler.CosineAnnealingLR(opt_adam_c100, T_max=30)
+    
+    for epoch in range(30):
+        model_c100.train()
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        for inputs, targets in c100_trainloader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            opt_muon_c100.zero_grad()
+            opt_adam_c100.zero_grad()
+            outputs = model_c100(inputs)
+            loss = criterion(outputs, targets)
+            
+            # Apply light L1 penalty to preserve parameters
+            l1_reg = 0.0
+            for name, param in model_c100.named_parameters():
+                if "weight_eml" in name or "weight_base" in name:
+                    l1_reg += torch.sum(torch.abs(param))
+            loss = loss + 1e-5 * l1_reg
+            
+            loss.backward()
+            opt_muon_c100.step()
+            opt_adam_c100.step()
+            
+            running_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
+            
+        scheduler_muon_c100.step()
+        scheduler_adam_c100.step()
+        print(f"CIFAR-100 Fine-Tuning Epoch {epoch+1}/30 | Loss: {running_loss/len(c100_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
         
-    model.eval()
+    # Evaluate CIFAR-100 model
+    model_c100.eval()
     test_correct = 0
     test_total = 0
     with torch.no_grad():
-        for inputs, targets in testloader:
+        for inputs, targets in c100_testloader:
             inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
+            outputs = model_c100(inputs)
             _, predicted = outputs.max(1)
             test_total += targets.size(0)
             test_correct += predicted.eq(targets).sum().item()
             
-    print(f"Test Accuracy after 100 epochs: {100.0 * test_correct / test_total:.2f}%")
+    print(f"Final CIFAR-100 Test Accuracy: {100.0 * test_correct / test_total:.2f}%")
     
+    # Prune weights
     with torch.no_grad():
-        for name, param in model.named_parameters():
+        for name, param in model_c100.named_parameters():
             if "weight_eml" in name or "weight_base" in name:
                 param[torch.abs(param) < 0.05] = 0.0
                 
-    model.to("cpu")
-    generate_esp32_header(model, "large_scale_experiment/esp32_cifar100_inference.h")
+    model_c100.to("cpu")
+    generate_esp32_header(model_c100, "large_scale_experiment/esp32_cifar100_inference.h")
 
 if __name__ == "__main__":
     main()
