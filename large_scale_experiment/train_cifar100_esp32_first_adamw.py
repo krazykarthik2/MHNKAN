@@ -8,69 +8,7 @@ import torchvision
 import torchvision.transforms as transforms
 import numpy as np
 
-# 1. Define Muon Optimizer helper
-
-def newton_schulz5(G, steps=3):
-    # Newton-Schulz iteration for orthogonalization (steps=3 is fast and accurate)
-    a, b = G.shape
-    X = G / (G.norm() + 1e-7)
-    if a > b:
-        X = X.T
-    for _ in range(steps):
-        A = X @ X.T
-        B = A @ X
-        X = 1.5 * X - 0.5 * B
-    if a > b:
-        X = X.T
-    return X
-
-class Muon(optim.Optimizer):
-    """
-    Muon optimizer: Multi-variate orthogonalization optimizer.
-    Applies standard momentum followed by Newton-Schulz orthogonalization on 2D parameters.
-    """
-    def __init__(self, params, lr=0.02, momentum=0.9, ns_steps=3):
-        defaults = dict(lr=lr, momentum=momentum, ns_steps=ns_steps)
-        super().__init__(params, defaults)
-        
-    @torch.no_grad()
-    def step(self, closure=None):
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-                
-        for group in self.param_groups:
-            lr = group['lr']
-            momentum = group['momentum']
-            ns_steps = group['ns_steps']
-            
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                
-                state = self.state[p]
-                if 'momentum_buffer' not in state:
-                    state['momentum_buffer'] = torch.zeros_like(p)
-                    
-                buf = state['momentum_buffer']
-                buf.mul_(momentum).add_(grad)
-                
-                # Reshape N-D tensor to 2D matrix
-                shape = p.shape
-                flat_p = p.view(shape[0], -1)
-                flat_buf = buf.view(shape[0], -1)
-                
-                # Apply Newton-Schulz orthogonal step
-                u = newton_schulz5(flat_buf, steps=ns_steps)
-                
-                # Update weights
-                p.add_(u.view(shape), alpha=-lr)
-                
-        return loss
-
-# 2. Define EML-KAN Layers
+# 1. Define EML-KAN Layers
 
 class EMLKANActivation(nn.Module):
     def __init__(self, channels, num_components=2):
@@ -88,14 +26,20 @@ class EMLKANActivation(nn.Module):
         self.weight_eml = nn.Parameter(torch.randn(channels, num_components) * 0.01)
 
     def forward(self, x):
+        # x shape: [Batch, Channels, H, W] or [Batch, Channels]
         is_4d = len(x.shape) == 4
         if is_4d:
+            # Transpose to align channels for parameter mapping
             x = x.permute(0, 2, 3, 1) # [B, H, W, C]
             
         out = self.weight_base * x
         for k in range(self.num_components):
+            # Clamp exponential argument to prevent float overflow to inf/nan
             arg_x = torch.clamp(self.a[:, k] * x + self.b[:, k], min=-10.0, max=10.0)
+            
+            # Use stable softplus to prevent log(1 + exp(z)) overflow
             arg_y = F.softplus(self.c[:, k] * x + self.d[:, k]) + 1e-6
+            
             out = out + self.weight_eml[:, k] * (torch.exp(arg_x) - torch.log(arg_y))
             
         if is_4d:
@@ -121,7 +65,7 @@ class EMLKANLinear(nn.Module):
     def forward(self, x):
         return self.act(self.linear(x))
 
-# 3. Complete EML-KAN CIFAR-100 Classifier Architecture
+# 2. Complete EML-KAN CIFAR-100 Classifier Architecture
 
 class EMLKANCifar100(nn.Module):
     def __init__(self, num_components=2):
@@ -141,15 +85,17 @@ class EMLKANCifar100(nn.Module):
         x = self.classifier(x)
         return x
 
-# 4. Export to ESP32 C++ Code Generator
+# 3. Export to ESP32 C++ Code Generator
 
 def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
     print(f"Generating ESP32 inference header at {filepath}...")
     
+    # Automatically create parent directories if specified
     dir_name = os.path.dirname(filepath)
     if dir_name:
         os.makedirs(dir_name, exist_ok=True)
         
+    # Extract weights
     conv1 = model.features[0].conv.weight.data.numpy()
     bn1 = model.features[0].bn
     mean1 = bn1.running_mean.data.numpy()
@@ -179,10 +125,12 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
         f.write("#define EML_KAN_CIFAR100_H\n\n")
         f.write("#include <math.h>\n\n")
         
+        # Write helper softplus function
         f.write("inline float softplus(float x) {\n")
         f.write("    return logf(1.0f + expf(x));\n")
         f.write("}\n\n")
         
+        # Save model weight shapes and flat data
         def write_array(name, arr):
             f.write(f"const float {name}[] PROGMEM = {{\n    ")
             flat = arr.flatten()
@@ -194,6 +142,7 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
                     f.write("\n    ")
             f.write("\n};\n\n")
             
+        # Conv 1 Weights & BN Coefficients
         write_array("CONV1_WEIGHTS", conv1)
         write_array("BN1_SCALE", scale1)
         write_array("BN1_OFFSET", offset1)
@@ -204,6 +153,7 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
         write_array("ACT1_W_BASE", act1.weight_base.data.numpy())
         write_array("ACT1_W_EML", act1.weight_eml.data.numpy())
         
+        # Conv 2 Weights & BN Coefficients
         write_array("CONV2_WEIGHTS", conv2)
         write_array("BN2_SCALE", scale2)
         write_array("BN2_OFFSET", offset2)
@@ -214,6 +164,7 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
         write_array("ACT2_W_BASE", act2.weight_base.data.numpy())
         write_array("ACT2_W_EML", act2.weight_eml.data.numpy())
         
+        # FC Weights
         write_array("FC_WEIGHTS", fc)
         write_array("ACT3_A", act3.a.data.numpy())
         write_array("ACT3_B", act3.b.data.numpy())
@@ -225,7 +176,7 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
         f.write("#endif // EML_KAN_CIFAR100_H\n")
     print("ESP32 header generated successfully.")
 
-# 5. Training Pipeline Loop
+# 4. Training Pipeline Loop
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -253,38 +204,25 @@ def main():
     model = EMLKANCifar100().to(device)
     criterion = nn.CrossEntropyLoss()
     
-    # Split parameters: 2D (Muon) and 1D (AdamW)
-    params_2d = []
-    params_1d = []
-    for name, p in model.named_parameters():
-        if p.requires_grad:
-            if p.ndim >= 2:
-                params_2d.append(p)
-            else:
-                params_1d.append(p)
-                
-    # Optimize using Muon for structural matrices and AdamW for 1D weights
-    opt_muon = Muon(params_2d, lr=0.03, momentum=0.9, ns_steps=3)
-    opt_adam = optim.AdamW(params_1d, lr=0.003, weight_decay=1e-4)
+    # Set initial learning rate to 0.003 for improved gradient exploration
+    optimizer = optim.AdamW(model.parameters(), lr=0.003, weight_decay=5e-4)
     
-    # Cosine Annealing Schedulers for 40 epochs
-    scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=40)
-    scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=40)
+    # Cosine Annealing Learning Rate Scheduler for 100 epochs
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
     
-    print("Starting training with Muon + AdamW (40 epochs)...")
-    for epoch in range(40):
+    print("Starting training (100 epochs)...")
+    for epoch in range(100):
         model.train()
         running_loss = 0.0
         correct = 0
         total = 0
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             inputs, targets = inputs.to(device), targets.to(device)
-            opt_muon.zero_grad()
-            opt_adam.zero_grad()
-            
+            optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, targets)
             
+            # Lower L1 penalty scale to preserve parameters early in training
             l1_reg = 0.0
             for name, param in model.named_parameters():
                 if "weight_eml" in name or "weight_base" in name:
@@ -292,21 +230,19 @@ def main():
             loss = loss + 1e-5 * l1_reg
             
             loss.backward()
-            opt_muon.step()
-            opt_adam.step()
+            optimizer.step()
             
             running_loss += loss.item()
             _, predicted = outputs.max(1)
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
             
-        scheduler_muon.step()
-        scheduler_adam.step()
-        
+        scheduler.step()
         acc = 100.0 * correct / total
-        if (epoch + 1) % 5 == 0 or epoch == 0:
-            print(f"Epoch {epoch+1}/40 | Loss: {running_loss/len(trainloader):.4f} | Accuracy: {acc:.2f}% | Muon LR: {scheduler_muon.get_last_lr()[0]:.6f}")
+        if (epoch + 1) % 10 == 0 or epoch == 0:
+            print(f"Epoch {epoch+1}/100 | Loss: {running_loss/len(trainloader):.4f} | Accuracy: {acc:.2f}% | LR: {scheduler.get_last_lr()[0]:.6f}")
         
+    # Evaluate model
     model.eval()
     test_correct = 0
     test_total = 0
@@ -318,13 +254,15 @@ def main():
             test_total += targets.size(0)
             test_correct += predicted.eq(targets).sum().item()
             
-    print(f"Test Accuracy after 40 epochs: {100.0 * test_correct / test_total:.2f}%")
+    print(f"Test Accuracy after 100 epochs: {100.0 * test_correct / test_total:.2f}%")
     
+    # Prune model parameters before generating code
     with torch.no_grad():
         for name, param in model.named_parameters():
             if "weight_eml" in name or "weight_base" in name:
                 param[torch.abs(param) < 0.05] = 0.0
                 
+    # Generate ESP32 code header
     model.to("cpu")
     generate_esp32_header(model, "large_scale_experiment/esp32_cifar100_inference.h")
 
