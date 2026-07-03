@@ -233,14 +233,26 @@ def main():
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
+    # Scale batch size to 1024 for high-throughput L40S training
+    batch_size = 1024 if torch.cuda.is_available() else 128
+    num_workers = 8 if torch.cuda.is_available() else 2
+    
     # ------------------ STAGE 1: CIFAR-10 PRE-TRAINING ------------------
-    print("\n--- STAGE 1: Pre-training on CIFAR-10 (15 epochs) ---")
+    print(f"\n--- STAGE 1: Pre-training on CIFAR-10 (15 epochs) | Batch Size: {batch_size} ---")
     c10_trainset = torchvision.datasets.CIFAR10(root='./data_c10', train=True, download=True, transform=transform_train)
-    c10_trainloader = torch.utils.data.DataLoader(c10_trainset, batch_size=128, shuffle=True, num_workers=2)
+    c10_trainloader = torch.utils.data.DataLoader(c10_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     
     model = EMLKANCifar(num_classes=10).to(device)
     criterion = nn.CrossEntropyLoss()
     
+    # Enable JIT model compilation for Ada Lovelace CUDA optimization
+    try:
+        print("Compiling CIFAR-10 model via torch.compile...")
+        compiled_model = torch.compile(model)
+    except Exception as e:
+        print(f"torch.compile failed, using eager execution: {e}")
+        compiled_model = model
+        
     params_2d = [p for p in model.parameters() if p.ndim >= 2]
     params_1d = [p for p in model.parameters() if p.ndim < 2]
     
@@ -249,6 +261,9 @@ def main():
     
     scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=15)
     scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=15)
+    
+    # Initialize Gradient Scaler for stable Mixed Precision FP16 training
+    scaler = torch.amp.GradScaler('cuda')
     
     for epoch in range(15):
         model.train()
@@ -259,11 +274,21 @@ def main():
             inputs, targets = inputs.to(device), targets.to(device)
             opt_muon.zero_grad()
             opt_adam.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            loss.backward()
-            opt_muon.step()
-            opt_adam.step()
+            
+            # Execute forward pass with autocast Mixed Precision
+            with torch.amp.autocast('cuda'):
+                outputs = compiled_model(inputs)
+                loss = criterion(outputs, targets)
+                
+            scaler.scale(loss).backward()
+            
+            # Unscale before steps to support custom Muon gradient buffer updates
+            scaler.unscale_(opt_muon)
+            scaler.unscale_(opt_adam)
+            
+            scaler.step(opt_muon)
+            scaler.step(opt_adam)
+            scaler.update()
             
             running_loss += loss.item()
             _, predicted = outputs.max(1)
@@ -275,25 +300,34 @@ def main():
         print(f"CIFAR-10 Epoch {epoch+1}/15 | Loss: {running_loss/len(c10_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
         
     # ------------------ STAGE 2: CIFAR-100 FINE-TUNING ------------------
-    print("\n--- STAGE 2: Transfer Learning to CIFAR-100 (30 epochs) ---")
+    print(f"\n--- STAGE 2: Transfer Learning to CIFAR-100 (30 epochs) | Batch Size: {batch_size} ---")
     c100_trainset = torchvision.datasets.CIFAR100(root='./data_c100', train=True, download=True, transform=transform_train)
-    c100_trainloader = torch.utils.data.DataLoader(c100_trainset, batch_size=128, shuffle=True, num_workers=2)
+    c100_trainloader = torch.utils.data.DataLoader(c100_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     
     c100_testset = torchvision.datasets.CIFAR100(root='./data_c100', train=False, download=True, transform=transform_test)
     c100_testloader = torch.utils.data.DataLoader(c100_testset, batch_size=100, shuffle=False, num_workers=2)
     
-    # Instantiate CIFAR-100 model and load pre-trained feature weights
+    # Load pre-trained weights into CIFAR-100 architecture
     model_c100 = EMLKANCifar(num_classes=100).to(device)
     model_c100.features.load_state_dict(model.features.state_dict())
     
+    try:
+        print("Compiling CIFAR-100 model via torch.compile...")
+        compiled_c100 = torch.compile(model_c100)
+    except Exception as e:
+        print(f"torch.compile failed, using eager execution: {e}")
+        compiled_c100 = model_c100
+        
     params_2d_c100 = [p for p in model_c100.parameters() if p.ndim >= 2]
     params_1d_c100 = [p for p in model_c100.parameters() if p.ndim < 2]
     
-    opt_muon_c100 = Muon(params_2d_c100, lr=0.01) # Lower learning rate for fine-tuning
+    opt_muon_c100 = Muon(params_2d_c100, lr=0.01)
     opt_adam_c100 = optim.AdamW(params_1d_c100, lr=0.001, weight_decay=1e-4)
     
     scheduler_muon_c100 = optim.lr_scheduler.CosineAnnealingLR(opt_muon_c100, T_max=30)
     scheduler_adam_c100 = optim.lr_scheduler.CosineAnnealingLR(opt_adam_c100, T_max=30)
+    
+    scaler_c100 = torch.amp.GradScaler('cuda')
     
     for epoch in range(30):
         model_c100.train()
@@ -304,19 +338,26 @@ def main():
             inputs, targets = inputs.to(device), targets.to(device)
             opt_muon_c100.zero_grad()
             opt_adam_c100.zero_grad()
-            outputs = model_c100(inputs)
-            loss = criterion(outputs, targets)
             
-            # Apply light L1 penalty to preserve parameters
-            l1_reg = 0.0
-            for name, param in model_c100.named_parameters():
-                if "weight_eml" in name or "weight_base" in name:
-                    l1_reg += torch.sum(torch.abs(param))
-            loss = loss + 1e-5 * l1_reg
+            with torch.amp.autocast('cuda'):
+                outputs = compiled_c100(inputs)
+                loss = criterion(outputs, targets)
+                
+                # Apply light L1 penalty to preserve parameters
+                l1_reg = 0.0
+                for name, param in model_c100.named_parameters():
+                    if "weight_eml" in name or "weight_base" in name:
+                        l1_reg += torch.sum(torch.abs(param))
+                loss = loss + 1e-5 * l1_reg
+                
+            scaler_c100.scale(loss).backward()
             
-            loss.backward()
-            opt_muon_c100.step()
-            opt_adam_c100.step()
+            scaler_c100.unscale_(opt_muon_c100)
+            scaler_c100.unscale_(opt_adam_c100)
+            
+            scaler_c100.step(opt_muon_c100)
+            scaler_c100.step(opt_adam_c100)
+            scaler_c100.update()
             
             running_loss += loss.item()
             _, predicted = outputs.max(1)
