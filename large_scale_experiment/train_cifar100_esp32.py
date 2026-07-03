@@ -50,10 +50,11 @@ class EMLKANConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, num_components=2):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, padding=padding, bias=False)
+        self.bn = nn.BatchNorm2d(out_channels)
         self.act = EMLKANActivation(out_channels, num_components)
         
     def forward(self, x):
-        return self.act(self.conv(x))
+        return self.act(self.bn(self.conv(x)))
 
 class EMLKANLinear(nn.Module):
     def __init__(self, in_features, out_features, num_components=2):
@@ -96,9 +97,23 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
         
     # Extract weights
     conv1 = model.features[0].conv.weight.data.numpy()
+    bn1 = model.features[0].bn
+    mean1 = bn1.running_mean.data.numpy()
+    var1 = bn1.running_var.data.numpy()
+    weight1 = bn1.weight.data.numpy()
+    bias1 = bn1.bias.data.numpy()
+    scale1 = weight1 / np.sqrt(var1 + bn1.eps)
+    offset1 = bias1 - mean1 * scale1
     act1 = model.features[0].act
     
     conv2 = model.features[2].conv.weight.data.numpy()
+    bn2 = model.features[2].bn
+    mean2 = bn2.running_mean.data.numpy()
+    var2 = bn2.running_var.data.numpy()
+    weight2 = bn2.weight.data.numpy()
+    bias2 = bn2.bias.data.numpy()
+    scale2 = weight2 / np.sqrt(var2 + bn2.eps)
+    offset2 = bias2 - mean2 * scale2
     act2 = model.features[2].act
     
     fc = model.classifier.linear.weight.data.numpy()
@@ -127,8 +142,10 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
                     f.write("\n    ")
             f.write("\n};\n\n")
             
-        # Conv 1 Weights
+        # Conv 1 Weights & BN Coefficients
         write_array("CONV1_WEIGHTS", conv1)
+        write_array("BN1_SCALE", scale1)
+        write_array("BN1_OFFSET", offset1)
         write_array("ACT1_A", act1.a.data.numpy())
         write_array("ACT1_B", act1.b.data.numpy())
         write_array("ACT1_C", act1.c.data.numpy())
@@ -136,8 +153,10 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
         write_array("ACT1_W_BASE", act1.weight_base.data.numpy())
         write_array("ACT1_W_EML", act1.weight_eml.data.numpy())
         
-        # Conv 2 Weights
+        # Conv 2 Weights & BN Coefficients
         write_array("CONV2_WEIGHTS", conv2)
+        write_array("BN2_SCALE", scale2)
+        write_array("BN2_OFFSET", offset2)
         write_array("ACT2_A", act2.a.data.numpy())
         write_array("ACT2_B", act2.b.data.numpy())
         write_array("ACT2_C", act2.c.data.numpy())
@@ -177,17 +196,22 @@ def main():
     
     print("Loading CIFAR-100 dataset...")
     trainset = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_train)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True, num_workers=2)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=2)
     
     testset = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform_test)
     testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
     
     model = EMLKANCifar100().to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=0.01, weight_decay=1e-4)
     
-    print("Starting training (5 epochs)...")
-    for epoch in range(5):
+    # Lower initial learning rate to stabilize gradients
+    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=5e-4)
+    
+    # Cosine Annealing Learning Rate Scheduler for 100 epochs
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
+    
+    print("Starting training (100 epochs)...")
+    for epoch in range(100):
         model.train()
         running_loss = 0.0
         correct = 0
@@ -198,12 +222,12 @@ def main():
             outputs = model(inputs)
             loss = criterion(outputs, targets)
             
-            # Apply L1 penalty for sparsity
+            # Lower L1 penalty scale to preserve parameters early in training
             l1_reg = 0.0
             for name, param in model.named_parameters():
                 if "weight_eml" in name or "weight_base" in name:
                     l1_reg += torch.sum(torch.abs(param))
-            loss = loss + 1e-4 * l1_reg
+            loss = loss + 1e-5 * l1_reg
             
             loss.backward()
             optimizer.step()
@@ -213,8 +237,10 @@ def main():
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
             
+        scheduler.step()
         acc = 100.0 * correct / total
-        print(f"Epoch {epoch+1}/5 | Loss: {running_loss/len(trainloader):.4f} | Accuracy: {acc:.2f}%")
+        if (epoch + 1) % 10 == 0 or epoch == 0:
+            print(f"Epoch {epoch+1}/100 | Loss: {running_loss/len(trainloader):.4f} | Accuracy: {acc:.2f}% | LR: {scheduler.get_last_lr()[0]:.6f}")
         
     # Evaluate model
     model.eval()
@@ -228,7 +254,7 @@ def main():
             test_total += targets.size(0)
             test_correct += predicted.eq(targets).sum().item()
             
-    print(f"Test Accuracy: {100.0 * test_correct / test_total:.2f}%")
+    print(f"Test Accuracy after 100 epochs: {100.0 * test_correct / test_total:.2f}%")
     
     # Prune model parameters before generating code
     with torch.no_grad():
