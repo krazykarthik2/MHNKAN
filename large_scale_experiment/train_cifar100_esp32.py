@@ -131,11 +131,18 @@ class EMLKANResidualBlock(nn.Module):
     """
     Compact EML-KAN Residual Block with Skip Connection.
     Bypasses input to output: x = x + conv2(conv1(x))
+    Zero-initialized to act as a perfect identity mapping at epoch 0.
     """
     def __init__(self, channels, num_components=2):
         super().__init__()
         self.conv1 = EMLKANConv2d(channels, channels, kernel_size=3, padding=1, num_components=num_components)
         self.conv2 = EMLKANConv2d(channels, channels, kernel_size=3, padding=1, num_components=num_components)
+        
+        # Zero-initialize second conv/act weights to start as perfect identity mapping
+        with torch.no_grad():
+            self.conv2.conv.weight.zero_()
+            self.conv2.act.weight_base.zero_()
+            self.conv2.act.weight_eml.zero_()
         
     def forward(self, x):
         return x + self.conv2(self.conv1(x))
