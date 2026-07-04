@@ -192,10 +192,10 @@ def main():
     num_workers = 8 if torch.cuda.is_available() else 2
     
     print("Loading CIFAR-100 dataset...")
-    full_trainset = torchvision.datasets.CIFAR100(root='./data_c100', train=True, download=True, transform=transform_train)
+    full_trainset = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_train)
     c100_trainloader = torch.utils.data.DataLoader(full_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     
-    full_testset = torchvision.datasets.CIFAR100(root='./data_c100', train=False, download=True, transform=transform_test)
+    full_testset = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform_test)
     c100_testloader = torch.utils.data.DataLoader(full_testset, batch_size=100, shuffle=False, num_workers=2)
     
     # Instantiate the pre-trained MobileNetV3 + EML-KAN model
