@@ -102,13 +102,12 @@ def main():
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
-    # Check parent directories for pre-existing local CIFAR-100 datasets
     data_root = "./data"
-    for path in ["./data", "../data", "../../data"]:
-        if os.path.exists(os.path.join(path, "cifar-100-python")):
-            data_root = path
-            break
-            
+    torchvision.datasets.CIFAR100.mirrors = [
+        "https://huggingface.co/datasets/nakroy/cifar100-python/resolve/main/",
+        "https://raw.githubusercontent.com/uoip/cifar-mirror/master/",
+        "https://www.cs.toronto.edu/~kriz/"
+    ]
     testset = torchvision.datasets.CIFAR100(root=data_root, train=False, download=True, transform=transform)
     
     # Output file setup

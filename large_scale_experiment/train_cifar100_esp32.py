@@ -211,13 +211,12 @@ def main():
     num_workers = 2
     
     print("Loading CIFAR-100 dataset...")
-    # Check parent directories for pre-existing local CIFAR-100 datasets
     data_root = "./data"
-    for path in ["./data", "../data", "../../data"]:
-        if os.path.exists(os.path.join(path, "cifar-100-python")):
-            data_root = path
-            break
-            
+    torchvision.datasets.CIFAR100.mirrors = [
+        "https://huggingface.co/datasets/nakroy/cifar100-python/resolve/main/",
+        "https://raw.githubusercontent.com/uoip/cifar-mirror/master/",
+        "https://www.cs.toronto.edu/~kriz/"
+    ]
     full_trainset = torchvision.datasets.CIFAR100(root=data_root, train=True, download=True, transform=transform_train)
     c100_trainloader = torch.utils.data.DataLoader(full_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     
