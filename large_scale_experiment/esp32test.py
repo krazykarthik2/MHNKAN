@@ -43,7 +43,9 @@ class EMLKANLinear(nn.Module):
 class EMLKANMobileNetCifar(nn.Module):
     def __init__(self, num_classes=100):
         super().__init__()
-        self.backbone = mobilenet_v3_small(weights=None).features
+        # Load official pre-trained ImageNet weights to avoid random feature extraction
+        weights = MobileNet_V3_Small_Weights.DEFAULT
+        self.backbone = mobilenet_v3_small(weights=weights).features
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
         self.classifier = EMLKANLinear(576, num_classes)
 
