@@ -51,19 +51,12 @@ void setup() {
 void loop() {
     // Check if sync command "SYNC" is received
     if (Serial.find("SYNC")) {
-        float features[576];
-        byte* feature_bytes = (byte*)features;
+        static float features[576]; // allocated statically to prevent stack overflow
         int expected_bytes = 2304; // 576 * sizeof(float)
         
-        // Wait and read the binary feature array from Serial
-        int bytes_read = 0;
-        unsigned long timeout_start = millis();
-        while (bytes_read < expected_bytes && (millis() - timeout_start) < 3000) {
-            if (Serial.available() > 0) {
-                feature_bytes[bytes_read] = Serial.read();
-                bytes_read++;
-            }
-        }
+        // Read the binary feature array directly from Serial buffer in one go
+        Serial.setTimeout(3000); // Set 3 seconds timeout
+        int bytes_read = Serial.readBytes((char*)features, expected_bytes);
         
         if (bytes_read == expected_bytes) {
             float logits[100];
@@ -83,14 +76,20 @@ void loop() {
                 }
             }
             
-            // Send prediction and latency back to the Python script
-            Serial.print("PRED: ");
+            // Send debug features and prediction back to the Python script
+            Serial.print("FEAT: ");
+            Serial.print(features[0], 6);
+            Serial.print(" ");
+            Serial.print(features[1], 6);
+            Serial.print(" PRED: ");
             Serial.print(max_class);
             Serial.print(" TIME: ");
             Serial.println(duration);
         } else {
-            // Error handling for timeout
-            Serial.println("PRED: -1 TIME: 0 (TIMEOUT)");
+            // Error handling for timeout or partial read
+            Serial.print("FEAT: 0.0 0.0 PRED: -1 TIME: 0 (TIMEOUT, read ");
+            Serial.print(bytes_read);
+            Serial.println(" bytes)");
         }
     }
 }

@@ -153,14 +153,32 @@ def main():
         esp32_pred = -1
         esp32_time = 0
         
-        # Parse output from ESP32 (formatted as: "PRED: <class> TIME: <micros>")
-        if "PRED:" in line and "TIME:" in line:
+        # Parse output from ESP32 (formatted as: "FEAT: <f0> <f1> PRED: <class> TIME: <micros>")
+        if "FEAT:" in line and "PRED:" in line:
             try:
                 parts = line.split()
-                esp32_pred = int(parts[1])
-                esp32_time = int(parts[3])
-            except ValueError:
+                feat_0 = float(parts[1])
+                feat_1 = float(parts[2])
+                esp32_pred = int(parts[4])
+                esp32_time = int(parts[6])
+                
+                # Verify transmission integrity
+                diff = abs(feat_0 - features[0]) + abs(feat_1 - features[1])
+                if diff > 1e-4:
+                    print(f"\n[Warning] Serial data corruption detected on sample {idx+1}!")
+                    print(f"  PyTorch sent: ({features[0]:.6f}, {features[1]:.6f})")
+                    print(f"  ESP32 received: ({feat_0:.6f}, {feat_1:.6f})\n")
+            except Exception:
                 pass
+        else:
+            # Fallback if parsing old format or error output
+            if "PRED:" in line:
+                try:
+                    parts = line.split()
+                    esp32_pred = int(parts[1])
+                    esp32_time = int(parts[3])
+                except Exception:
+                    pass
                 
         match = "YES" if pytorch_pred == esp32_pred else "NO"
         if match == "YES":
