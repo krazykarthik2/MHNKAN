@@ -211,6 +211,12 @@ def main():
     num_workers = 2
     
     print("Loading CIFAR-100 dataset...")
+    # Override official Toronto CS mirrors with robust GitHub and HuggingFace mirrors to prevent 503 HTTP errors
+    torchvision.datasets.CIFAR100.mirrors = [
+        "https://raw.githubusercontent.com/uoip/cifar-mirror/master/",
+        "https://huggingface.co/datasets/cifar100/resolve/main/",
+        "https://www.cs.toronto.edu/~kriz/"
+    ]
     full_trainset = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_train)
     c100_trainloader = torch.utils.data.DataLoader(full_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     

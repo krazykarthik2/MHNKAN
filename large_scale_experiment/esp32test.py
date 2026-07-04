@@ -92,6 +92,12 @@ def main():
     
     # Load CIFAR-100 test dataset
     print("Loading CIFAR-100 test dataset...")
+    # Override official Toronto CS mirrors with robust GitHub and HuggingFace mirrors to prevent 503 HTTP errors
+    torchvision.datasets.CIFAR100.mirrors = [
+        "https://raw.githubusercontent.com/uoip/cifar-mirror/master/",
+        "https://huggingface.co/datasets/cifar100/resolve/main/",
+        "https://www.cs.toronto.edu/~kriz/"
+    ]
     # Add random transformations: slight shift, rotation, horizontal flip
     transform = transforms.Compose([
         transforms.Resize((128, 128)),
