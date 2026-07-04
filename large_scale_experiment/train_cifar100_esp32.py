@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
+from torch.utils.data import Subset
 import numpy as np
 
 # 1. Define Muon Optimizer helper
@@ -233,21 +234,27 @@ def main():
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
-    # Scale batch size to 1024 for high-throughput L40S training
     batch_size = 1024 if torch.cuda.is_available() else 128
     num_workers = 8 if torch.cuda.is_available() else 2
     
-    # ------------------ STAGE 1: CIFAR-10 PRE-TRAINING ------------------
-    print(f"\n--- STAGE 1: Pre-training on CIFAR-10 (15 epochs) | Batch Size: {batch_size} ---")
-    c10_trainset = torchvision.datasets.CIFAR10(root='./data_c10', train=True, download=True, transform=transform_train)
-    c10_trainloader = torch.utils.data.DataLoader(c10_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    # Load CIFAR-100 once for both stages
+    print("Loading CIFAR-100 dataset...")
+    full_trainset = torchvision.datasets.CIFAR100(root='./data_c100', train=True, download=True, transform=transform_train)
+    full_testset = torchvision.datasets.CIFAR100(root='./data_c100', train=False, download=True, transform=transform_test)
     
-    model = EMLKANCifar(num_classes=10).to(device)
+    # ------------------ STAGE 1: PRE-TRAINING ON CIFAR-100 SUBSET (CLASSES 0-19) ------------------
+    print(f"\n--- STAGE 1: Pre-training on CIFAR-100 Subset (Classes 0-19) | Batch Size: {batch_size} ---")
+    
+    # Filter indices for classes 0 to 19
+    subset_train_indices = [i for i, target in enumerate(full_trainset.targets) if target < 20]
+    subset_trainset = Subset(full_trainset, subset_train_indices)
+    subset_trainloader = torch.utils.data.DataLoader(subset_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    
+    model = EMLKANCifar(num_classes=20).to(device)
     criterion = nn.CrossEntropyLoss()
     
-    # Enable JIT model compilation for Ada Lovelace CUDA optimization
     try:
-        print("Compiling CIFAR-10 model via torch.compile...")
+        print("Compiling Subset model via torch.compile...")
         compiled_model = torch.compile(model)
     except Exception as e:
         print(f"torch.compile failed, using eager execution: {e}")
@@ -262,7 +269,6 @@ def main():
     scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=15)
     scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=15)
     
-    # Initialize Gradient Scaler for stable Mixed Precision FP16 training
     scaler = torch.amp.GradScaler('cuda')
     
     for epoch in range(15):
@@ -270,19 +276,17 @@ def main():
         running_loss = 0.0
         correct = 0
         total = 0
-        for inputs, targets in c10_trainloader:
+        for inputs, targets in subset_trainloader:
             inputs, targets = inputs.to(device), targets.to(device)
             opt_muon.zero_grad()
             opt_adam.zero_grad()
             
-            # Execute forward pass with autocast Mixed Precision
             with torch.amp.autocast('cuda'):
                 outputs = compiled_model(inputs)
                 loss = criterion(outputs, targets)
                 
             scaler.scale(loss).backward()
             
-            # Unscale before steps to support custom Muon gradient buffer updates
             scaler.unscale_(opt_muon)
             scaler.unscale_(opt_adam)
             
@@ -297,17 +301,14 @@ def main():
             
         scheduler_muon.step()
         scheduler_adam.step()
-        print(f"CIFAR-10 Epoch {epoch+1}/15 | Loss: {running_loss/len(c10_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
+        print(f"Subset Epoch {epoch+1}/15 | Loss: {running_loss/len(subset_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
         
-    # ------------------ STAGE 2: CIFAR-100 FINE-TUNING ------------------
-    print(f"\n--- STAGE 2: Transfer Learning to CIFAR-100 (30 epochs) | Batch Size: {batch_size} ---")
-    c100_trainset = torchvision.datasets.CIFAR100(root='./data_c100', train=True, download=True, transform=transform_train)
-    c100_trainloader = torch.utils.data.DataLoader(c100_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    # ------------------ STAGE 2: CIFAR-100 FULL FINE-TUNING ------------------
+    print(f"\n--- STAGE 2: Transfer Learning to Full CIFAR-100 (30 epochs) | Batch Size: {batch_size} ---")
+    c100_trainloader = torch.utils.data.DataLoader(full_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    c100_testloader = torch.utils.data.DataLoader(full_testset, batch_size=100, shuffle=False, num_workers=2)
     
-    c100_testset = torchvision.datasets.CIFAR100(root='./data_c100', train=False, download=True, transform=transform_test)
-    c100_testloader = torch.utils.data.DataLoader(c100_testset, batch_size=100, shuffle=False, num_workers=2)
-    
-    # Load pre-trained weights into CIFAR-100 architecture
+    # Load pre-trained features into 100-class architecture
     model_c100 = EMLKANCifar(num_classes=100).to(device)
     model_c100.features.load_state_dict(model.features.state_dict())
     
@@ -343,7 +344,6 @@ def main():
                 outputs = compiled_c100(inputs)
                 loss = criterion(outputs, targets)
                 
-                # Apply light L1 penalty to preserve parameters
                 l1_reg = 0.0
                 for name, param in model_c100.named_parameters():
                     if "weight_eml" in name or "weight_base" in name:
@@ -382,7 +382,6 @@ def main():
             
     print(f"Final CIFAR-100 Test Accuracy: {100.0 * test_correct / test_total:.2f}%")
     
-    # Prune weights
     with torch.no_grad():
         for name, param in model_c100.named_parameters():
             if "weight_eml" in name or "weight_base" in name:
