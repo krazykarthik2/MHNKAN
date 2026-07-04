@@ -95,18 +95,14 @@ def main():
     
     # Load CIFAR-100 test dataset
     print("Loading CIFAR-100 test dataset...")
-    # Add random transformations: slight shift, rotation, horizontal flip
+    # Completely deterministic transforms (no random augmentations)
     transform = transforms.Compose([
         transforms.Resize((128, 128)),
-        # transforms.RandomRotation(15),
-        # transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
-        # transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        # transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
+        transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
-    # transform = None
     data_root = "./data"
-    testset = torchvision.datasets.CIFAR100(root=data_root, train=False, transform=transform)
+    testset = torchvision.datasets.CIFAR100(root=data_root, train=False, transform=transform, download=True)
     
     # Output file setup
     csv_file = "./output.csv"
@@ -116,7 +112,7 @@ def main():
         writer = csv.writer(f)
         writer.writerow(csv_header)
         
-    print(f"\nEvaluating {args.samples} random augmented samples...")
+    print(f"\nEvaluating {args.samples} sequential samples...")
     print("-" * 80)
     print(f"{'Sample':<8} | {'True Label':<12} | {'PyTorch Pred':<12} | {'ESP32 Pred':<12} | {'Latency (us)':<12} | {'Match?'}")
     print("-" * 80)
@@ -124,8 +120,8 @@ def main():
     matches = 0
     
     for idx in range(args.samples):
-        # Pick a random sample
-        sample_idx = random.randint(0, len(testset) - 1)
+        # Pick sequential samples to remove all randomness
+        sample_idx = idx
         image, target = testset[sample_idx]
         
         # Extract features locally using PyTorch backbone
