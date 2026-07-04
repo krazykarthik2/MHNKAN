@@ -177,22 +177,22 @@ def main():
     print(f"Training using device: {device}")
     
     transform_train = transforms.Compose([
-        transforms.Resize((224, 224)), # Resize to match MobileNetV3 input expectation
-        transforms.RandomCrop(224, padding=28),
+        transforms.Resize((128, 128)), # Resize for ImageNet filters
+        transforms.RandomCrop(128, padding=16),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
     transform_test = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((128, 128)),
         transforms.ToTensor(),
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
-    # Scale batch size to 256 for optimal update steps on 224x224 input sizes
+    # Scale batch size to 256 for optimal update steps on 128x128 input sizes
     batch_size = 256 if torch.cuda.is_available() else 64
-    num_workers = 8 if torch.cuda.is_available() else 2
+    num_workers = 2
     
     print("Loading CIFAR-100 dataset...")
     full_trainset = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_train)
@@ -205,12 +205,8 @@ def main():
     model = EMLKANMobileNetCifar(num_classes=100).to(device)
     criterion = nn.CrossEntropyLoss()
     
-    try:
-        print("Compiling model via torch.compile...")
-        compiled_model = torch.compile(model)
-    except Exception as e:
-        print(f"torch.compile failed, using eager execution: {e}")
-        compiled_model = model
+    # Disable torch.compile to avoid compilation overhead on first epoch
+    compiled_model = model
         
     # Group parameters for fine-tuning
     params_classifier_2d = [p for p in model.classifier.parameters() if p.requires_grad and p.ndim >= 2]
@@ -288,7 +284,7 @@ def main():
     # Export full model to ONNX
     try:
         print("Exporting full model to ONNX...")
-        dummy_input = torch.randn(1, 3, 224, 224)
+        dummy_input = torch.randn(1, 3, 128, 128)
         torch.onnx.export(model, dummy_input, "large_scale_experiment/eml_kan_mobilenet.onnx", 
                           input_names=['input'], output_names=['output'],
                           opset_version=12) # Use basic opset 12 for maximum compatibility
