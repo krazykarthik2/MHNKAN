@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
-from torch.utils.data import Subset
+from torchvision.models import mobilenet_v3_small, MobileNet_V3_Small_Weights
 import numpy as np
 
 # 1. Define Muon Optimizer helper
@@ -93,16 +93,6 @@ class EMLKANActivation(nn.Module):
             out = out.permute(0, 3, 1, 2) # [B, C, H, W]
         return out
 
-class EMLKANConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, num_components=2):
-        super().__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, padding=padding, bias=False)
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.act = EMLKANActivation(out_channels, num_components)
-        
-    def forward(self, x):
-        return self.act(self.bn(self.conv(x)))
-
 class EMLKANLinear(nn.Module):
     def __init__(self, in_features, out_features, num_components=2):
         super().__init__()
@@ -112,27 +102,30 @@ class EMLKANLinear(nn.Module):
     def forward(self, x):
         return self.act(self.linear(x))
 
-# 3. Flexible 2-layer EML-KAN CIFAR Architecture
+# 3. EML-KAN MobileNetCifar Classifier
 
-class EMLKANCifar(nn.Module):
-    def __init__(self, num_classes=10, num_components=2):
+class EMLKANMobileNetCifar(nn.Module):
+    def __init__(self, num_classes=100, num_components=2):
         super().__init__()
-        self.features = nn.Sequential(
-            EMLKANConv2d(3, 32, kernel_size=3, padding=1, num_components=num_components),
-            nn.MaxPool2d(2, 2), # 16x16
-            EMLKANConv2d(32, 64, kernel_size=3, padding=1, num_components=num_components),
-            nn.MaxPool2d(2, 2), # 8x8
-            nn.AdaptiveAvgPool2d((1, 1)) # 1x1x64
-        )
-        self.classifier = EMLKANLinear(64, num_classes, num_components=num_components)
+        # Load pre-trained MobileNetV3 small backbone
+        weights = MobileNet_V3_Small_Weights.DEFAULT
+        self.backbone = mobilenet_v3_small(weights=weights).features
+        
+        # Freeze backbone weights
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+            
+        self.gap = nn.AdaptiveAvgPool2d((1, 1))
+        self.classifier = EMLKANLinear(576, num_classes, num_components=num_components)
 
     def forward(self, x):
-        x = self.features(x)
+        x = self.backbone(x)
+        x = self.gap(x)
         x = torch.flatten(x, 1)
         x = self.classifier(x)
         return x
 
-# 4. Export to ESP32 C++ Code Generator
+# 4. Export to ESP32 C++ Code Generator & ONNX
 
 def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
     print(f"Generating ESP32 inference header at {filepath}...")
@@ -141,33 +134,13 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
     if dir_name:
         os.makedirs(dir_name, exist_ok=True)
         
-    conv1 = model.features[0].conv.weight.data.numpy()
-    bn1 = model.features[0].bn
-    mean1 = bn1.running_mean.data.numpy()
-    var1 = bn1.running_var.data.numpy()
-    weight1 = bn1.weight.data.numpy()
-    bias1 = bn1.bias.data.numpy()
-    scale1 = weight1 / np.sqrt(var1 + bn1.eps)
-    offset1 = bias1 - mean1 * scale1
-    act1 = model.features[0].act
-    
-    conv2 = model.features[2].conv.weight.data.numpy()
-    bn2 = model.features[2].bn
-    mean2 = bn2.running_mean.data.numpy()
-    var2 = bn2.running_var.data.numpy()
-    weight2 = bn2.weight.data.numpy()
-    bias2 = bn2.bias.data.numpy()
-    scale2 = weight2 / np.sqrt(var2 + bn2.eps)
-    offset2 = bias2 - mean2 * scale2
-    act2 = model.features[2].act
-    
     fc = model.classifier.linear.weight.data.numpy()
     act3 = model.classifier.act
     
     with open(filepath, "w") as f:
-        f.write("/* Automatically generated EML-KAN C++ ESP32 inference header */\n")
-        f.write("#ifndef EML_KAN_CIFAR100_H\n")
-        f.write("#define EML_KAN_CIFAR100_H\n\n")
+        f.write("/* Automatically generated EML-KAN Classifier C++ ESP32 inference header */\n")
+        f.write("#ifndef EML_KAN_CLASSIFIER_H\n")
+        f.write("#define EML_KAN_CLASSIFIER_H\n\n")
         f.write("#include <math.h>\n\n")
         
         f.write("inline float softplus(float x) {\n")
@@ -185,26 +158,7 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
                     f.write("\n    ")
             f.write("\n};\n\n")
             
-        write_array("CONV1_WEIGHTS", conv1)
-        write_array("BN1_SCALE", scale1)
-        write_array("BN1_OFFSET", offset1)
-        write_array("ACT1_A", act1.a.data.numpy())
-        write_array("ACT1_B", act1.b.data.numpy())
-        write_array("ACT1_C", act1.c.data.numpy())
-        write_array("ACT1_D", act1.d.data.numpy())
-        write_array("ACT1_W_BASE", act1.weight_base.data.numpy())
-        write_array("ACT1_W_EML", act1.weight_eml.data.numpy())
-        
-        write_array("CONV2_WEIGHTS", conv2)
-        write_array("BN2_SCALE", scale2)
-        write_array("BN2_OFFSET", offset2)
-        write_array("ACT2_A", act2.a.data.numpy())
-        write_array("ACT2_B", act2.b.data.numpy())
-        write_array("ACT2_C", act2.c.data.numpy())
-        write_array("ACT2_D", act2.d.data.numpy())
-        write_array("ACT2_W_BASE", act2.weight_base.data.numpy())
-        write_array("ACT2_W_EML", act2.weight_eml.data.numpy())
-        
+        # Export classifier layers
         write_array("FC_WEIGHTS", fc)
         write_array("ACT3_A", act3.a.data.numpy())
         write_array("ACT3_B", act3.b.data.numpy())
@@ -213,8 +167,8 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
         write_array("ACT3_W_BASE", act3.weight_base.data.numpy())
         write_array("ACT3_W_EML", act3.weight_eml.data.numpy())
         
-        f.write("#endif // EML_KAN_CIFAR100_H\n")
-    print("ESP32 header generated successfully.")
+        f.write("#endif // EML_KAN_CLASSIFIER_H\n")
+    print("ESP32 classifier header generated successfully.")
 
 # 5. Training Pipeline Loop
 
@@ -234,34 +188,30 @@ def main():
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
-    batch_size = 128
+    batch_size = 1024 if torch.cuda.is_available() else 128
     num_workers = 8 if torch.cuda.is_available() else 2
     
-    # Load CIFAR-100 once for both stages
     print("Loading CIFAR-100 dataset...")
-    full_trainset = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_train)
-    full_testset = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform_test)
+    full_trainset = torchvision.datasets.CIFAR100(root='./data_c100', train=True, download=True, transform=transform_train)
+    c100_trainloader = torch.utils.data.DataLoader(full_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     
-    # ------------------ STAGE 1: PRE-TRAINING ON CIFAR-100 SUBSET (CLASSES 0-19) ------------------
-    print(f"\n--- STAGE 1: Pre-training on CIFAR-100 Subset (Classes 0-19) | Batch Size: {batch_size} ---")
+    full_testset = torchvision.datasets.CIFAR100(root='./data_c100', train=False, download=True, transform=transform_test)
+    c100_testloader = torch.utils.data.DataLoader(full_testset, batch_size=100, shuffle=False, num_workers=2)
     
-    # Filter indices for classes 0 to 19
-    subset_train_indices = [i for i, target in enumerate(full_trainset.targets) if target < 20]
-    subset_trainset = Subset(full_trainset, subset_train_indices)
-    subset_trainloader = torch.utils.data.DataLoader(subset_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    
-    model = EMLKANCifar(num_classes=20).to(device)
+    # Instantiate the pre-trained MobileNetV3 + EML-KAN model
+    model = EMLKANMobileNetCifar(num_classes=100).to(device)
     criterion = nn.CrossEntropyLoss()
     
     try:
-        print("Compiling Subset model via torch.compile...")
+        print("Compiling model via torch.compile...")
         compiled_model = torch.compile(model)
     except Exception as e:
         print(f"torch.compile failed, using eager execution: {e}")
         compiled_model = model
         
-    params_2d = [p for p in model.parameters() if p.ndim >= 2]
-    params_1d = [p for p in model.parameters() if p.ndim < 2]
+    # Only train the active classifier parameters
+    params_2d = [p for name, p in model.named_parameters() if p.requires_grad and p.ndim >= 2]
+    params_1d = [p for name, p in model.named_parameters() if p.requires_grad and p.ndim < 2]
     
     opt_muon = Muon(params_2d, lr=0.03)
     opt_adam = optim.AdamW(params_1d, lr=0.003, weight_decay=1e-4)
@@ -271,12 +221,13 @@ def main():
     
     scaler = torch.amp.GradScaler('cuda')
     
+    print("\n--- Training EML-KAN Classifier (30 epochs) ---")
     for epoch in range(30):
         model.train()
         running_loss = 0.0
         correct = 0
         total = 0
-        for inputs, targets in subset_trainloader:
+        for inputs, targets in c100_trainloader:
             inputs, targets = inputs.to(device), targets.to(device)
             opt_muon.zero_grad()
             opt_adam.zero_grad()
@@ -301,94 +252,41 @@ def main():
             
         scheduler_muon.step()
         scheduler_adam.step()
-        print(f"Subset Epoch {epoch+1}/30 | Loss: {running_loss/len(subset_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
-        
-    # ------------------ STAGE 2: CIFAR-100 FULL FINE-TUNING ------------------
-    print(f"\n--- STAGE 2: Transfer Learning to Full CIFAR-100 (80 epochs) | Batch Size: {batch_size} ---")
-    c100_trainloader = torch.utils.data.DataLoader(full_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    c100_testloader = torch.utils.data.DataLoader(full_testset, batch_size=100, shuffle=False, num_workers=2)
-    
-    # Load pre-trained features into 100-class architecture
-    model_c100 = EMLKANCifar(num_classes=100).to(device)
-    model_c100.features.load_state_dict(model.features.state_dict())
-    
-    try:
-        print("Compiling CIFAR-100 model via torch.compile...")
-        compiled_c100 = torch.compile(model_c100)
-    except Exception as e:
-        print(f"torch.compile failed, using eager execution: {e}")
-        compiled_c100 = model_c100
-        
-    params_2d_c100 = [p for p in model_c100.parameters() if p.ndim >= 2]
-    params_1d_c100 = [p for p in model_c100.parameters() if p.ndim < 2]
-    
-    opt_muon_c100 = Muon(params_2d_c100, lr=0.01)
-    opt_adam_c100 = optim.AdamW(params_1d_c100, lr=0.001, weight_decay=1e-4)
-    
-    scheduler_muon_c100 = optim.lr_scheduler.CosineAnnealingLR(opt_muon_c100, T_max=80)
-    scheduler_adam_c100 = optim.lr_scheduler.CosineAnnealingLR(opt_adam_c100, T_max=80)
-    
-    scaler_c100 = torch.amp.GradScaler('cuda')
-    
-    for epoch in range(80):
-        model_c100.train()
-        running_loss = 0.0
-        correct = 0
-        total = 0
-        for inputs, targets in c100_trainloader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            opt_muon_c100.zero_grad()
-            opt_adam_c100.zero_grad()
-            
-            with torch.amp.autocast('cuda'):
-                outputs = compiled_c100(inputs)
-                loss = criterion(outputs, targets)
-                
-                l1_reg = 0.0
-                for name, param in model_c100.named_parameters():
-                    if "weight_eml" in name or "weight_base" in name:
-                        l1_reg += torch.sum(torch.abs(param))
-                loss = loss + 1e-5 * l1_reg
-                
-            scaler_c100.scale(loss).backward()
-            
-            scaler_c100.unscale_(opt_muon_c100)
-            scaler_c100.unscale_(opt_adam_c100)
-            
-            scaler_c100.step(opt_muon_c100)
-            scaler_c100.step(opt_adam_c100)
-            scaler_c100.update()
-            
-            running_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
-            
-        scheduler_muon_c100.step()
-        scheduler_adam_c100.step()
-        print(f"CIFAR-100 Fine-Tuning Epoch {epoch+1}/80 | Loss: {running_loss/len(c100_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
+        print(f"Fine-Tuning Epoch {epoch+1}/30 | Loss: {running_loss/len(c100_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
         
     # Evaluate CIFAR-100 model
-    model_c100.eval()
+    model.eval()
     test_correct = 0
     test_total = 0
     with torch.no_grad():
         for inputs, targets in c100_testloader:
             inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model_c100(inputs)
+            outputs = model(inputs)
             _, predicted = outputs.max(1)
             test_total += targets.size(0)
             test_correct += predicted.eq(targets).sum().item()
             
-    print(f"Final CIFAR-100 Test Accuracy: {100.0 * test_correct / test_total:.2f}%")
+    print(f"\nFinal CIFAR-100 Test Accuracy: {100.0 * test_correct / test_total:.2f}%")
     
+    # Prune classifier weights
     with torch.no_grad():
-        for name, param in model_c100.named_parameters():
+        for name, param in model.classifier.named_parameters():
             if "weight_eml" in name or "weight_base" in name:
                 param[torch.abs(param) < 0.05] = 0.0
                 
-    model_c100.to("cpu")
-    generate_esp32_header(model_c100, "large_scale_experiment/esp32_cifar100_inference.h")
+    model.to("cpu")
+    generate_esp32_header(model, "large_scale_experiment/esp32_cifar100_inference.h")
+    
+    # Export full model to ONNX for TFLite compilation
+    try:
+        print("Exporting full model to ONNX...")
+        dummy_input = torch.randn(1, 3, 32, 32)
+        torch.onnx.export(model, dummy_input, "large_scale_experiment/eml_kan_mobilenet.onnx", 
+                          input_names=['input'], output_names=['output'],
+                          opset_version=14)
+        print("ONNX model exported successfully to large_scale_experiment/eml_kan_mobilenet.onnx")
+    except Exception as e:
+        print(f"ONNX export failed: {e}")
 
 if __name__ == "__main__":
     main()
