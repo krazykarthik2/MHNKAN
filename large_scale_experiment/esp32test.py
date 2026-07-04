@@ -139,6 +139,9 @@ def main():
             features = model.gap(features)
             features = torch.flatten(features, 1).squeeze(0).numpy()
             
+            # Print the first 5 feature elements for diagnostics
+            print(f"Sample {idx+1} local features (first 5): {features[:5]}")
+            
             # Local PyTorch prediction
             logits = model.classifier(torch.tensor(features).unsqueeze(0))
             pytorch_pred = int(torch.argmax(logits, dim=1).item())
