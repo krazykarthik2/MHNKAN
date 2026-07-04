@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torch.multiprocessing as mp
 import numpy as np
 
 # 1. Define Muon Optimizer helper
@@ -60,7 +61,7 @@ class Muon(optim.Optimizer):
                 
         return loss
 
-# 1. Define EML-KAN Linear Layer
+# 2. Define EML-KAN Layers
 
 class EMLKANActivation(nn.Module):
     def __init__(self, channels, num_components=2):
@@ -94,10 +95,6 @@ class EMLKANLinear(nn.Module):
         return self.act(self.linear(x))
 
 class EMLKANFFNReplica(nn.Module):
-    """
-    2-Layer Compositional EML-KAN with LayerNorm stabilization.
-    Bypasses activation explosions and aligns features exactly.
-    """
     def __init__(self, d_model, num_components=2):
         super().__init__()
         self.layer1 = EMLKANLinear(d_model, d_model, num_components=num_components)
@@ -107,99 +104,45 @@ class EMLKANFFNReplica(nn.Module):
     def forward(self, x):
         return self.layer2(self.ln(self.layer1(x)))
 
-# 2. Main Distillation Script
+# 3. Layer worker process function
 
-def main():
-    parser = argparse.ArgumentParser(description="Zero-Data Transformer FFN Layer Distillation")
-    parser.add_argument("--model", type=str, default="bert-small", 
-                        choices=["bert-tiny", "bert-small", "gpt2"],
-                        help="Hugging Face model to distill: bert-tiny (4M), bert-small (29M), or gpt2 (124M)")
-    args = parser.parse_args()
+def distill_layer_worker(layer_idx, model_name, args_model, d_model, d_ffn, orig_params, device_str, return_dict):
+    device = torch.device(device_str)
+    print(f"[Worker Layer {layer_idx}] Initialized on device: {device}")
     
-    print("Zero-Data FFN Layer Distillation Demonstration")
-    print("=" * 60)
-    
-    try:
-        from transformers import AutoModel, GPT2Model
-        print("Transformers library loaded successfully.")
-    except ImportError:
-        print("Installing 'transformers' library...")
-        import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "transformers"])
-        from transformers import AutoModel, GPT2Model
-        
-    # Set model config based on selection
-    if args.model == "bert-tiny":
-        model_name = "prajjwal1/bert-tiny"
-        d_model = 128
-        d_ffn = 512
-    elif args.model == "bert-small":
-        model_name = "prajjwal1/bert-small" # 29M parameters
-        d_model = 512
-        d_ffn = 2048
-    elif args.model == "gpt2":
-        model_name = "gpt2" # 124M parameters
-        d_model = 768
-        d_ffn = 3072
-        
-    print(f"Loading pre-trained model: {model_name}...")
-    try:
-        if args.model == "gpt2":
-            hf_model = GPT2Model.from_pretrained(model_name)
-        else:
-            hf_model = AutoModel.from_pretrained(model_name)
-        print("Model loaded successfully!")
-    except Exception as e:
-        print(f"Failed to load model from Hugging Face: {e}")
-        sys.exit(1)
-        
-    hf_model.eval()
-    
-    # Extract the target FFN layer depending on the model architecture
-    if args.model == "gpt2":
-        # GPT-2 FFN (MLP) block
-        mlp_block = hf_model.h[0].mlp
+    # Load model locally inside the process
+    from transformers import AutoModel, GPT2Model
+    if args_model == "gpt2":
+        hf_model = GPT2Model.from_pretrained(model_name)
+        mlp_block = hf_model.h[layer_idx].mlp
         def original_ffn(x):
             with torch.no_grad():
                 y = mlp_block(x)
             return y
-        orig_params = d_model * d_ffn * 2 + d_ffn + d_model # parameters inside MLP
     else:
-        # BERT FFN block
-        ffn_intermediate = hf_model.encoder.layer[0].intermediate
-        ffn_output = hf_model.encoder.layer[0].output.dense
+        hf_model = AutoModel.from_pretrained(model_name)
+        ffn_intermediate = hf_model.encoder.layer[layer_idx].intermediate
+        ffn_output = hf_model.encoder.layer[layer_idx].output.dense
         def original_ffn(x):
             with torch.no_grad():
                 h = ffn_intermediate(x)
                 y = ffn_output(h)
             return y
-        orig_params = d_model * d_ffn + d_ffn * d_model + d_ffn + d_model
-
-    # Create 2-layer EML-KAN replica (mapping d_model -> d_model -> d_model)
-    print(f"\nInitializing 2-layer EML-KAN FFN replica model ({d_model} -> {d_model} -> {d_model} | K=2)...")
-    kan_replica = EMLKANFFNReplica(d_model, num_components=2)
+            
+    hf_model.to(device)
+    hf_model.eval()
+    
+    # Setup KAN replica
+    kan_replica = EMLKANFFNReplica(d_model, num_components=2).to(device)
     
     # Generate Synthetic Calibration Data (Zero-Data Distillation)
-    # We generate 50,000 synthetic random vectors to allow detailed calibration mapping
-    print("Generating synthetic noise vectors (50,000 samples)...")
-    X_train = torch.randn(50000, d_model)
-    
-    print("Running synthetic vectors through the original FFN to get target outputs...")
+    X_train = torch.randn(50000, d_model).to(device)
     Y_train = original_ffn(X_train)
     
-    # Create test vectors to evaluate generalization
-    X_test = torch.randn(2000, d_model)
+    X_test = torch.randn(2000, d_model).to(device)
     Y_test = original_ffn(X_test)
     
-    # Distillation Training Loop
-    # Use CUDA if available for the 30M/124M model shapes
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Training on device: {device}")
-    
-    kan_replica = kan_replica.to(device)
-    X_train, Y_train = X_train.to(device), Y_train.to(device)
-    X_test, Y_test = X_test.to(device), Y_test.to(device)
-    
+    # Group parameters
     params_2d = []
     params_1d = []
     for name, p in kan_replica.named_parameters():
@@ -209,16 +152,13 @@ def main():
             else:
                 params_1d.append(p)
                 
-    # Use Muon for structural weights and AdamW for biases/shapes
     opt_muon = Muon(params_2d, lr=0.02)
     opt_adam = optim.AdamW(params_1d, lr=0.002, weight_decay=1e-4)
     
-    # Cosine Annealing learning rate schedulers
     scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=100)
     scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=100)
     criterion = nn.MSELoss()
     
-    print(f"\nTraining EML-KAN to copy the {args.model} FFN behavior (100 epochs)...")
     dataset = torch.utils.data.TensorDataset(X_train, Y_train)
     loader = torch.utils.data.DataLoader(dataset, batch_size=256, shuffle=True)
     
@@ -237,27 +177,107 @@ def main():
             
         scheduler_muon.step()
         scheduler_adam.step()
-            
-        if (epoch + 1) % 10 == 0 or epoch == 0:
+        
+        if (epoch + 1) % 25 == 0 or epoch == 0:
             kan_replica.eval()
             with torch.no_grad():
                 test_outputs = kan_replica(X_test)
                 test_loss = criterion(test_outputs, Y_test).item()
                 cos_sim = F.cosine_similarity(test_outputs, Y_test).mean().item()
-                
-            print(f"Epoch {epoch+1:02d}/100 | Train Loss: {epoch_loss/len(loader):.6f} | Test MSE: {test_loss:.6f} | Alignment (Cosine Sim): {cos_sim*100.0:.2f}% | Muon LR: {scheduler_muon.get_last_lr()[0]:.6f}")
+            print(f"[Layer {layer_idx} | Device {device_str}] Epoch {epoch+1:02d}/100 | Train Loss: {epoch_loss/len(loader):.6f} | Test MSE: {test_loss:.6f} | Cosine Sim: {cos_sim*100.0:.2f}%")
             
-    # Report final findings
-    print("\n" + "=" * 60)
-    print("DISTILLATION REPORT:")
-    print(f"Target Model: {model_name}")
-    print(f"Layer Mapping: FFN Block ({d_model} -> {d_ffn} -> {d_model})")
-    print(f"Original FFN Parameters: {orig_params:,} weights")
-    print(f"EML-KAN Replica Parameters: {d_model * d_model * 11 * 2:,} weights (Before Sparsity)")
-    print(f"Final Test Mean Squared Error (MSE): {test_loss:.6f}")
-    print(f"Behavioral Similarity: {cos_sim*100.0:.2f}%")
+    # Final evaluation
+    kan_replica.eval()
+    with torch.no_grad():
+        test_outputs = kan_replica(X_test)
+        final_test_loss = criterion(test_outputs, Y_test).item()
+        final_cos_sim = F.cosine_similarity(test_outputs, Y_test).mean().item()
+        
+    return_dict[layer_idx] = {
+        "final_mse": final_test_loss,
+        "final_cos_sim": final_cos_sim,
+        "replica_params": d_model * d_model * 11 * 2
+    }
+    print(f"[Layer {layer_idx}] Done! Final Cosine Similarity: {final_cos_sim*100.0:.2f}%")
+
+# 4. Main Multi-processing Controller
+
+def main():
+    # Set start method for multiprocessing
+    mp.set_start_method('spawn', force=True)
+    
+    parser = argparse.ArgumentParser(description="Parallelized Zero-Data Transformer FFN Layer Distillation")
+    parser.add_argument("--model", type=str, default="bert-small", 
+                        choices=["bert-tiny", "bert-small", "gpt2"],
+                        help="Hugging Face model to distill: bert-tiny (4 layers), bert-small (4 layers), or gpt2 (12 layers)")
+    args = parser.parse_args()
+    
+    print("Zero-Data FFN Layer Parallelized Distillation Demonstration")
     print("=" * 60)
-    print("Conclusion: EML-KAN copied the FFN behavior with high fidelity using 0 real data!")
+    
+    if args.model == "bert-tiny":
+        model_name = "prajjwal1/bert-tiny"
+        d_model = 128
+        d_ffn = 512
+        num_layers = 4
+    elif args.model == "bert-small":
+        model_name = "prajjwal1/bert-small"
+        d_model = 512
+        d_ffn = 2048
+        num_layers = 4
+    elif args.model == "gpt2":
+        model_name = "gpt2"
+        d_model = 768
+        d_ffn = 3072
+        num_layers = 12
+        
+    if args.model == "gpt2":
+        orig_params = d_model * d_ffn * 2 + d_ffn + d_model
+    else:
+        orig_params = d_model * d_ffn + d_ffn * d_model + d_ffn + d_model
+        
+    # Discover available GPUs
+    num_gpus = torch.cuda.device_count()
+    print(f"Discovered {num_gpus} CUDA devices for distillation.")
+    
+    manager = mp.Manager()
+    return_dict = manager.dict()
+    processes = []
+    
+    print(f"Spawning parallel processes for all {num_layers} layers...")
+    for idx in range(num_layers):
+        if num_gpus > 0:
+            device_str = f"cuda:{idx % num_gpus}"
+        else:
+            device_str = "cpu"
+            
+        p = mp.Process(target=distill_layer_worker, args=(
+            idx, model_name, args.model, d_model, d_ffn, orig_params, device_str, return_dict
+        ))
+        p.start()
+        processes.append(p)
+        
+    # Wait for all processes to complete
+    for p in processes:
+        p.join()
+        
+    # Print Final Summary Report
+    print("\n" + "=" * 80)
+    print(f"PARALLEL DISTILLATION REPORT FOR: {model_name}")
+    print("=" * 80)
+    print(f"{'Layer Index':<12} | {'Original Params':<18} | {'EML-KAN Params':<18} | {'Test MSE':<12} | {'Cosine Sim'}")
+    print("-" * 80)
+    
+    total_cos_sim = 0.0
+    for idx in sorted(return_dict.keys()):
+        stats = return_dict[idx]
+        total_cos_sim += stats['final_cos_sim']
+        print(f"{idx:<12} | {orig_params:<18,} | {stats['replica_params']:<18,} | {stats['final_mse']:<12.6f} | {stats['final_cos_sim']*100.0:.2f}%")
+        
+    print("-" * 80)
+    print(f"Average Model Alignment (Cosine Similarity): {100.0 * total_cos_sim / num_layers:.2f}%")
+    print("=" * 80)
+    print("All layers distilled successfully!")
 
 if __name__ == "__main__":
     main()
