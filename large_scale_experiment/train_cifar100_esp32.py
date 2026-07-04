@@ -158,8 +158,24 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
                     f.write("\n    ")
             f.write("\n};\n\n")
             
-        # Export classifier layers
-        write_array("FC_WEIGHTS", fc)
+        # Quantize FC weights to 8-bit integers
+        fc_max = np.max(np.abs(fc))
+        fc_scale = fc_max / 127.0 if fc_max > 0 else 1.0
+        fc_quant = np.clip(np.round(fc / fc_scale), -128, 127).astype(np.int8)
+        
+        # Write Int8 weights
+        f.write("const int8_t FC_WEIGHTS_QUANT[] PROGMEM = {\n    ")
+        flat_fc = fc_quant.flatten()
+        for idx, val in enumerate(flat_fc):
+            f.write(f"{val}")
+            if idx < len(flat_fc) - 1:
+                f.write(", ")
+            if (idx + 1) % 12 == 0:
+                f.write("\n    ")
+        f.write("\n};\n\n")
+        f.write(f"const float FC_SCALE = {fc_scale:.8f}f;\n\n")
+        
+        # Export remaining float parameters
         write_array("ACT3_A", act3.a.data.numpy())
         write_array("ACT3_B", act3.b.data.numpy())
         write_array("ACT3_C", act3.c.data.numpy())

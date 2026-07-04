@@ -1,92 +1,87 @@
 #include <Arduino.h>
 #include <math.h>
+#include "esp32_cifar100_inference.h"
 
-// Reusable Softplus activation helper
-float softplus(float z) {
+// Softplus activation helper
+inline float softplus_val(float z) {
     return logf(1.0f + expf(z));
 }
 
 /**
- * Compiled Genetically Optimized EML-KAN DAG.
- * Fits: f(x) = sin(pi * x) * exp(x)
- * 
- * This C++ code was compiled directly from our trained 24-parameter model.
- * It uses zero-allocation, division-free float arithmetic, making it optimal
- * for real-time execution in ESP32 control loops.
+ * Evaluates the trained EML-KAN Classifier on a given 576-element feature vector.
+ * Reconstructs weights dynamically on-the-fly using Int8 de-quantization.
  */
-float evaluate_eml_kan(float x) {
-    // 1. Layer 1 Primitive Exponentials
-    float u1_0_0 = expf(-0.009907f * x - 0.476977f);
-    float u1_1_0 = expf(0.766712f * x + 0.079296f);
-    float u1_1_1 = expf(-0.449610f * x + 0.156112f);
-    float u1_2_0 = expf(0.136217f * x - 0.163462f);
-    float u1_2_1 = expf(0.658656f * x + 0.348503f);
-    
-    // 2. Layer 1 Softplus Log Features
-    float L1_0_0 = logf(1.0f + expf(0.017476f * x - 0.183690f));
-    float L1_1_0 = logf(1.0f + expf(-6.442822f * x - 0.723518f));
-    float L1_1_1 = logf(1.0f + expf(-1.266124f * x + 0.162390f));
-    float L1_2_0 = logf(1.0f + expf(-0.723010f * x - 0.025089f));
-    
-    // Log-of-log variable caches
-    float P1_0_0 = logf(L1_0_0 + 1e-6f);
-    float P1_1_0 = logf(L1_1_0 + 1e-6f);
-    float P1_1_1 = logf(L1_1_1 + 1e-6f);
-    float P1_2_0 = logf(L1_2_0 + 1e-6f);
-    
-    // 3. Hidden nodes (Families A-D)
-    float h_0 = -0.254968f * x + -0.179489f * (u1_0_0 - P1_0_0);
-    float h_1 = 0.278732f * x + 0.073645f * (u1_1_0 - P1_1_0) + 0.394847f * (u1_1_1 - P1_1_1);
-    float h_2 = -0.480346f * x + -0.336229f * (u1_2_0 - P1_2_0) + 0.541431f * (u1_2_1 - P1_2_0);
-    float h_3 = 0.0f; // Pruned by Genetic Algorithm
-    
-    // 4. Layer 2 Primitives
-    float u2_0 = expf(-0.237718f * h_0 - 0.218791f);
-    float u2_1 = expf(0.036160f * h_1 - 0.327769f);
-    float u2_2 = expf(0.541431f * h_2 - 0.313585f);
-    
-    float L2_0 = logf(1.0f + expf(0.831390f * h_0 - 0.186568f));
-    float L2_1 = logf(1.0f + expf(-0.274185f * h_1 + 0.264554f));
-    
-    float P2_0 = logf(L2_0 + 1e-6f);
-    float P2_1 = logf(L2_1 + 1e-6f);
-    
-    // 5. Output assembly
-    float y_out = 1.005284f * h_0 - 0.266622f * (u2_0 - P2_0) 
-                - 0.263359f * h_1 - 0.091050f * (u2_1 - P2_1) 
-                - 0.325225f * (u2_2);
-                
-    return y_out;
+void evaluate_eml_kan_classifier(const float* features, float* output_logits) {
+    // There are 100 classes
+    for (int c = 0; c < 100; c++) {
+        // 1. Compute de-quantized linear dot product: z = Sum(W_quant * scale * x)
+        float z = 0.0f;
+        for (int i = 0; i < 576; i++) {
+            float weight = (float)pgm_read_byte(&FC_WEIGHTS_QUANT[c * 576 + i]) * FC_SCALE;
+            z += weight * features[i];
+        }
+        
+        // 2. Apply EML-KAN Activation Function with K=2 components
+        float weight_base = pgm_read_float(&ACT3_W_BASE[c]);
+        float out = weight_base * z;
+        
+        for (int k = 0; k < 2; k++) {
+            float a = pgm_read_float(&ACT3_A[c * 2 + k]);
+            float b = pgm_read_float(&ACT3_B[c * 2 + k]);
+            float c_param = pgm_read_float(&ACT3_C[c * 2 + k]);
+            float d = pgm_read_float(&ACT3_D[c * 2 + k]);
+            float w_eml = pgm_read_float(&ACT3_W_EML[c * 2 + k]);
+            
+            // Stable clamped exponential and softplus evaluation
+            float arg_x = a * z + b;
+            if (arg_x < -10.0f) arg_x = -10.0f;
+            if (arg_x > 10.0f) arg_x = 10.0f;
+            
+            float arg_y = softplus_val(c_param * z + d) + 1e-6f;
+            out += w_eml * (expf(arg_x) - logf(arg_y));
+        }
+        
+        output_logits[c] = out;
+    }
 }
 
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("ESP32 EML-KAN Inference Benchmark Start!");
+    Serial.println("ESP32 EML-KAN Quantized Classifier Benchmark Start!");
 }
 
 void loop() {
-    // Read raw sensor voltage from pin 34 (range 0 to 4095)
-    int raw_analog = analogRead(34);
+    // Generate dummy extracted feature vector (576 elements) representing a test image
+    float dummy_features[576];
+    for (int i = 0; i < 576; i++) {
+        dummy_features[i] = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f; // range [-1.0, 1.0]
+    }
     
-    // Normalize input to range [-1.0, 1.0] for EML-KAN
-    float x = ((float)raw_analog / 2047.5f) - 1.0f;
+    float logits[100];
     
-    // Measure execution latency
+    // Benchmark latency
     unsigned long start_time = micros();
-    float calibrated_output = evaluate_eml_kan(x);
+    evaluate_eml_kan_classifier(dummy_features, logits);
     unsigned long duration = micros() - start_time;
     
-    // Print calibration values
-    Serial.print("Raw: ");
-    Serial.print(raw_analog);
-    Serial.print(" | Normalised X: ");
-    Serial.print(x, 4);
-    Serial.print(" | Calibrated Output: ");
-    Serial.print(calibrated_output, 6);
-    Serial.print(" | Inference Time: ");
+    // Find the predicted class (highest logit)
+    int max_class = 0;
+    float max_logit = logits[0];
+    for (int c = 1; c < 100; c++) {
+        if (logits[c] > max_logit) {
+            max_logit = logits[c];
+            max_class = c;
+        }
+    }
+    
+    Serial.print("Predicted Class: ");
+    Serial.print(max_class);
+    Serial.print(" | Max Logit: ");
+    Serial.print(max_logit, 4);
+    Serial.print(" | Execution Latency: ");
     Serial.print(duration);
     Serial.println(" us");
     
-    delay(500); // Sample twice per second
+    delay(1000);
 }
