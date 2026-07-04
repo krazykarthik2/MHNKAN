@@ -2,8 +2,10 @@
 #include <math.h>
 #include "esp32_cifar100_inference.h"
 
-// Softplus activation helper
+// Numerically stable Softplus activation helper to prevent expf() overflow to infinity
 inline float softplus_val(float z) {
+    if (z > 20.0f) return z;
+    if (z < -20.0f) return 0.0f;
     return logf(1.0f + expf(z));
 }
 
