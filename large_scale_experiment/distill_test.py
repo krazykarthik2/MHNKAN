@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -42,67 +43,100 @@ class EMLKANLinear(nn.Module):
 # 2. Main Distillation Script
 
 def main():
+    parser = argparse.ArgumentParser(description="Zero-Data Transformer FFN Layer Distillation")
+    parser.add_argument("--model", type=str, default="bert-small", 
+                        choices=["bert-tiny", "bert-small", "gpt2"],
+                        help="Hugging Face model to distill: bert-tiny (4M), bert-small (29M), or gpt2 (124M)")
+    args = parser.parse_args()
+    
     print("Zero-Data FFN Layer Distillation Demonstration")
     print("=" * 60)
     
-    # Try loading Hugging Face transformers
     try:
-        from transformers import AutoModel
+        from transformers import AutoModel, GPT2Model
         print("Transformers library loaded successfully.")
     except ImportError:
-        print("Installing 'transformers' library to download a tiny model...")
+        print("Installing 'transformers' library...")
         import subprocess
         subprocess.check_call([sys.executable, "-m", "pip", "install", "transformers"])
-        from transformers import AutoModel
+        from transformers import AutoModel, GPT2Model
         
-    # Load a popular tiny model: prajjwal1/bert-tiny (only 4.4M parameters)
-    model_name = "prajjwal1/bert-tiny"
+    # Set model config based on selection
+    if args.model == "bert-tiny":
+        model_name = "prajjwal1/bert-tiny"
+        d_model = 128
+        d_ffn = 512
+    elif args.model == "bert-small":
+        model_name = "prajjwal1/bert-small" # 29M parameters
+        d_model = 512
+        d_ffn = 2048
+    elif args.model == "gpt2":
+        model_name = "gpt2" # 124M parameters
+        d_model = 768
+        d_ffn = 3072
+        
     print(f"Loading pre-trained model: {model_name}...")
     try:
-        bert = AutoModel.from_pretrained(model_name)
+        if args.model == "gpt2":
+            hf_model = GPT2Model.from_pretrained(model_name)
+        else:
+            hf_model = AutoModel.from_pretrained(model_name)
         print("Model loaded successfully!")
     except Exception as e:
         print(f"Failed to load model from Hugging Face: {e}")
         sys.exit(1)
         
-    bert.eval()
+    hf_model.eval()
     
-    # Extract the Feed-Forward Network (FFN) block from Layer 0
-    # In BERT, the FFN consists of:
-    # 1. bert.encoder.layer[0].intermediate (Linear mapping 128 -> 512 + Act)
-    # 2. bert.encoder.layer[0].output.dense (Linear mapping 512 -> 128)
-    ffn_intermediate = bert.encoder.layer[0].intermediate
-    ffn_output = bert.encoder.layer[0].output.dense
-    
-    # Define a function representing the full original FFN block (128 -> 128)
-    def original_ffn(x):
-        with torch.no_grad():
-            h = ffn_intermediate(x) # 128 -> 512 + intermediate activation (GELU)
-            y = ffn_output(h)       # 512 -> 128
-        return y
+    # Extract the target FFN layer depending on the model architecture
+    if args.model == "gpt2":
+        # GPT-2 FFN (MLP) block
+        mlp_block = hf_model.h[0].mlp
+        def original_ffn(x):
+            with torch.no_grad():
+                y = mlp_block(x)
+            return y
+        orig_params = d_model * d_ffn * 2 + d_ffn + d_model # parameters inside MLP
+    else:
+        # BERT FFN block
+        ffn_intermediate = hf_model.encoder.layer[0].intermediate
+        ffn_output = hf_model.encoder.layer[0].output.dense
+        def original_ffn(x):
+            with torch.no_grad():
+                h = ffn_intermediate(x)
+                y = ffn_output(h)
+            return y
+        orig_params = d_model * d_ffn + d_ffn * d_model + d_ffn + d_model
 
-    # 3. Create EML-KAN replica (128 -> 128)
-    # This KAN block will attempt to mimic the entire 128 -> 512 -> 128 FFN mapping
-    print("\nInitializing EML-KAN replica model...")
-    kan_replica = EMLKANLinear(128, 128, num_components=2)
+    # Create EML-KAN replica (mapping d_model -> d_model directly)
+    print(f"\nInitializing EML-KAN replica model ({d_model} -> {d_model})...")
+    kan_replica = EMLKANLinear(d_model, d_model, num_components=2)
     
-    # 4. Generate Synthetic Calibration Data (Zero-Data Distillation)
+    # Generate Synthetic Calibration Data (Zero-Data Distillation)
     # We generate pure normal random vectors - NO real sentences or datasets!
     print("Generating synthetic noise vectors (15,000 samples)...")
-    X_train = torch.randn(15000, 128)
+    X_train = torch.randn(15000, d_model)
     
     print("Running synthetic vectors through the original FFN to get target outputs...")
     Y_train = original_ffn(X_train)
     
     # Create test vectors to evaluate generalization
-    X_test = torch.randn(2000, 128)
+    X_test = torch.randn(2000, d_model)
     Y_test = original_ffn(X_test)
     
-    # 5. Distillation Training Loop
+    # Distillation Training Loop
+    # Use CUDA if available for the 30M/124M model shapes
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Training on device: {device}")
+    
+    kan_replica = kan_replica.to(device)
+    X_train, Y_train = X_train.to(device), Y_train.to(device)
+    X_test, Y_test = X_test.to(device), Y_test.to(device)
+    
     optimizer = optim.Adam(kan_replica.parameters(), lr=0.01)
     criterion = nn.MSELoss()
     
-    print("\nTraining EML-KAN to copy the FFN block behavior (50 epochs)...")
+    print(f"\nTraining EML-KAN to copy the {args.model} FFN behavior (50 epochs)...")
     dataset = torch.utils.data.TensorDataset(X_train, Y_train)
     loader = torch.utils.data.DataLoader(dataset, batch_size=256, shuffle=True)
     
@@ -118,23 +152,21 @@ def main():
             epoch_loss += loss.item()
             
         if (epoch + 1) % 10 == 0 or epoch == 0:
-            # Evaluate generalization on test set
             kan_replica.eval()
             with torch.no_grad():
                 test_outputs = kan_replica(X_test)
                 test_loss = criterion(test_outputs, Y_test).item()
-                
-                # Calculate Cosine Similarity to measure alignment direction
                 cos_sim = F.cosine_similarity(test_outputs, Y_test).mean().item()
                 
             print(f"Epoch {epoch+1:02d}/50 | Train Loss: {epoch_loss/len(loader):.6f} | Test MSE: {test_loss:.6f} | Alignment (Cosine Sim): {cos_sim*100.0:.2f}%")
             
-    # 6. Report final findings
+    # Report final findings
     print("\n" + "=" * 60)
     print("DISTILLATION REPORT:")
-    print(f"Target Layer mapping: BERT-Tiny Layer 0 FFN (128 -> 512 -> 128)")
-    print(f"Original FFN Parameters: {128*512 + 512*128 + 512 + 128:,} weights")
-    print(f"EML-KAN Replica Parameters: {128*128*11:,} weights (Before Sparsity)")
+    print(f"Target Model: {model_name}")
+    print(f"Layer Mapping: FFN Block ({d_model} -> {d_ffn} -> {d_model})")
+    print(f"Original FFN Parameters: {orig_params:,} weights")
+    print(f"EML-KAN Replica Parameters: {d_model * d_model * 11:,} weights (Before Sparsity)")
     print(f"Final Test Mean Squared Error (MSE): {test_loss:.6f}")
     print(f"Behavioral Similarity: {cos_sim*100.0:.2f}%")
     print("=" * 60)
