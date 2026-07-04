@@ -2,47 +2,8 @@
 #include <math.h>
 #include "esp32_cifar100_inference.h"
 
-// Numerically stable Softplus activation helper to prevent expf() overflow to infinity
-inline float softplus_val(float z) {
-    if (z > 20.0f) return z;
-    if (z < -20.0f) return 0.0f;
-    return logf(1.0f + expf(z));
-}
-
-/**
- * Evaluates the trained EML-KAN Classifier on a given 576-element feature vector.
- * Reconstructs weights dynamically on-the-fly using Int8 de-quantization.
- */
-void evaluate_eml_kan_classifier(const float* features, float* output_logits) {
-    // There are 100 classes
-    for (int c = 0; c < 100; c++) {
-        float z = 0.0f;
-        for (int i = 0; i < 576; i++) {
-            float weight = (float)FC_WEIGHTS_QUANT[c * 576 + i] * FC_SCALE;
-            z += weight * features[i];
-        }
-        
-        float weight_base = ACT3_W_BASE[c];
-        float out = weight_base * z;
-        
-        for (int k = 0; k < 2; k++) {
-            float a = ACT3_A[c * 2 + k];
-            float b = ACT3_B[c * 2 + k];
-            float c_param = ACT3_C[c * 2 + k];
-            float d = ACT3_D[c * 2 + k];
-            float w_eml = ACT3_W_EML[c * 2 + k];
-            
-            float arg_x = a * z + b;
-            if (arg_x < -10.0f) arg_x = -10.0f;
-            if (arg_x > 10.0f) arg_x = 10.0f;
-            
-            float arg_y = softplus_val(c_param * z + d) + 1e-6f;
-            out += w_eml * (expf(arg_x) - logf(arg_y));
-        }
-        
-        output_logits[c] = out;
-    }
-}
+// The EML-KAN classifier evaluation function evaluate_eml_kan_classifier()
+// is fully generated as an optimized C++ DAG graph inside esp32_cifar100_inference.h.
 
 void setup() {
     Serial.begin(115200);

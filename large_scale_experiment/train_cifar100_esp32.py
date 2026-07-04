@@ -128,7 +128,7 @@ class EMLKANMobileNetCifar(nn.Module):
 # 4. Export to ESP32 C++ Code Generator & ONNX
 
 def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
-    print(f"Generating ESP32 inference header at {filepath}...")
+    print(f"Generating C++ DAG inference header at {filepath}...")
     
     dir_name = os.path.dirname(filepath)
     if dir_name:
@@ -138,53 +138,54 @@ def generate_esp32_header(model, filepath="esp32_cifar100_inference.h"):
     act3 = model.classifier.act
     
     with open(filepath, "w") as f:
-        f.write("/* Automatically generated EML-KAN Classifier C++ ESP32 inference header */\n")
+        f.write("/* Automatically generated EML-KAN Classifier C++ ESP32 DAG inference header */\n")
         f.write("#ifndef EML_KAN_CLASSIFIER_H\n")
         f.write("#define EML_KAN_CLASSIFIER_H\n\n")
         f.write("#include <math.h>\n\n")
         
-        f.write("inline float softplus(float x) {\n")
-        f.write("    return logf(1.0f + expf(x));\n")
+        # Stable softplus
+        f.write("inline float softplus_stable(float z) {\n")
+        f.write("    if (z > 20.0f) return z;\n")
+        f.write("    if (z < -20.0f) return 0.0f;\n")
+        f.write("    return logf(1.0f + expf(z));\n")
         f.write("}\n\n")
         
-        def write_array(name, arr):
-            f.write(f"const float {name}[] PROGMEM = {{\n    ")
-            flat = arr.flatten()
-            for idx, val in enumerate(flat):
-                f.write(f"{val:.6f}f")
-                if idx < len(flat) - 1:
-                    f.write(", ")
-                if (idx + 1) % 8 == 0:
-                    f.write("\n    ")
-            f.write("\n};\n\n")
+        # Write the DAG evaluation function
+        f.write("inline void evaluate_eml_kan_classifier(const float* features, float* output_logits) {\n")
+        
+        for c in range(100):
+            f.write(f"    // Class {c}\n")
+            f.write(f"    float z_{c} = 0.0f;\n")
             
-        # Quantize FC weights to 8-bit integers
-        fc_max = np.max(np.abs(fc))
-        fc_scale = fc_max / 127.0 if fc_max > 0 else 1.0
-        fc_quant = np.clip(np.round(fc / fc_scale), -128, 127).astype(np.int8)
-        
-        # Write Int8 weights
-        f.write("const int8_t FC_WEIGHTS_QUANT[] PROGMEM = {\n    ")
-        flat_fc = fc_quant.flatten()
-        for idx, val in enumerate(flat_fc):
-            f.write(f"{val}")
-            if idx < len(flat_fc) - 1:
-                f.write(", ")
-            if (idx + 1) % 12 == 0:
-                f.write("\n    ")
-        f.write("\n};\n\n")
-        f.write(f"const float FC_SCALE = {fc_scale:.8f}f;\n\n")
-        
-        # Export remaining float parameters
-        write_array("ACT3_A", act3.a.data.numpy())
-        write_array("ACT3_B", act3.b.data.numpy())
-        write_array("ACT3_C", act3.c.data.numpy())
-        write_array("ACT3_D", act3.d.data.numpy())
-        write_array("ACT3_W_BASE", act3.weight_base.data.numpy())
-        write_array("ACT3_W_EML", act3.weight_eml.data.numpy())
-        
+            # Find non-zero indices (skip pruned weights to speed up execution)
+            non_zero_indices = np.where(np.abs(fc[c]) >= 0.05)[0]
+            for idx in non_zero_indices:
+                f.write(f"    z_{c} += features[{idx}] * {fc[c, idx]:.6f}f;\n")
+                
+            # Evaluate EML KAN activation for class c
+            w_base = act3.weight_base[c].item()
+            f.write(f"    float out_{c} = {w_base:.6f}f * z_{c};\n")
+            
+            for k in range(2):
+                a = act3.a[c, k].item()
+                b = act3.b[c, k].item()
+                c_param = act3.c[c, k].item()
+                d = act3.d[c, k].item()
+                w_eml = act3.weight_eml[c, k].item()
+                
+                f.write(f"    {{\n")
+                f.write(f"        float arg_x = {a:.6f}f * z_{c} + {b:.6f}f;\n")
+                f.write(f"        if (arg_x < -10.0f) arg_x = -10.0f;\n")
+                f.write(f"        if (arg_x > 10.0f) arg_x = 10.0f;\n")
+                f.write(f"        float arg_y = softplus_stable({c_param:.6f}f * z_{c} + {d:.6f}f) + 1e-6f;\n")
+                f.write(f"        out_{c} += {w_eml:.6f}f * (expf(arg_x) - logf(arg_y));\n")
+                f.write(f"    }}\n")
+                
+            f.write(f"    output_logits[{c}] = out_{c};\n\n")
+            
+        f.write("}\n\n")
         f.write("#endif // EML_KAN_CLASSIFIER_H\n")
-    print("ESP32 classifier header generated successfully.")
+    print("ESP32 DAG classifier header generated successfully.")
 
 # 5. Training Pipeline Loop
 
