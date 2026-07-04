@@ -7,6 +7,59 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 
+# 1. Define Muon Optimizer helper
+
+def newton_schulz5(G, steps=3):
+    a, b = G.shape
+    X = G / (G.norm() + 1e-7)
+    if a > b:
+        X = X.T
+    for _ in range(steps):
+        A = X @ X.T
+        B = A @ X
+        X = 1.5 * X - 0.5 * B
+    if a > b:
+        X = X.T
+    return X
+
+class Muon(optim.Optimizer):
+    def __init__(self, params, lr=0.02, momentum=0.9, ns_steps=3):
+        defaults = dict(lr=lr, momentum=momentum, ns_steps=ns_steps)
+        super().__init__(params, defaults)
+        
+    @torch.no_grad()
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+                
+        for group in self.param_groups:
+            lr = group['lr']
+            momentum = group['momentum']
+            ns_steps = group['ns_steps']
+            
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                grad = p.grad
+                
+                state = self.state[p]
+                if 'momentum_buffer' not in state:
+                    state['momentum_buffer'] = torch.zeros_like(p)
+                    
+                buf = state['momentum_buffer']
+                buf.mul_(momentum).add_(grad)
+                
+                shape = p.shape
+                flat_p = p.view(shape[0], -1)
+                flat_buf = buf.view(shape[0], -1)
+                
+                u = newton_schulz5(flat_buf, steps=ns_steps)
+                p.add_(u.view(shape), alpha=-lr)
+                
+        return loss
+
 # 1. Define EML-KAN Linear Layer
 
 class EMLKANActivation(nn.Module):
@@ -42,16 +95,17 @@ class EMLKANLinear(nn.Module):
 
 class EMLKANFFNReplica(nn.Module):
     """
-    2-Layer Compositional EML-KAN to match the mathematical depth of standard FFNs.
-    Maps d_model ➔ d_model ➔ d_model.
+    2-Layer Compositional EML-KAN with LayerNorm stabilization.
+    Bypasses activation explosions and aligns features exactly.
     """
     def __init__(self, d_model, num_components=2):
         super().__init__()
         self.layer1 = EMLKANLinear(d_model, d_model, num_components=num_components)
+        self.ln = nn.LayerNorm(d_model)
         self.layer2 = EMLKANLinear(d_model, d_model, num_components=num_components)
         
     def forward(self, x):
-        return self.layer2(self.layer1(x))
+        return self.layer2(self.ln(self.layer1(x)))
 
 # 2. Main Distillation Script
 
@@ -126,9 +180,9 @@ def main():
     kan_replica = EMLKANFFNReplica(d_model, num_components=2)
     
     # Generate Synthetic Calibration Data (Zero-Data Distillation)
-    # We generate pure normal random vectors - NO real sentences or datasets!
-    print("Generating synthetic noise vectors (15,000 samples)...")
-    X_train = torch.randn(15000, d_model)
+    # We generate 50,000 synthetic random vectors to allow detailed calibration mapping
+    print("Generating synthetic noise vectors (50,000 samples)...")
+    X_train = torch.randn(50000, d_model)
     
     print("Running synthetic vectors through the original FFN to get target outputs...")
     Y_train = original_ffn(X_train)
@@ -146,9 +200,22 @@ def main():
     X_train, Y_train = X_train.to(device), Y_train.to(device)
     X_test, Y_test = X_test.to(device), Y_test.to(device)
     
-    optimizer = optim.Adam(kan_replica.parameters(), lr=0.01)
-    # Cosine Annealing learning rate scheduler for stable convergence
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
+    params_2d = []
+    params_1d = []
+    for name, p in kan_replica.named_parameters():
+        if p.requires_grad:
+            if p.ndim >= 2:
+                params_2d.append(p)
+            else:
+                params_1d.append(p)
+                
+    # Use Muon for structural weights and AdamW for biases/shapes
+    opt_muon = Muon(params_2d, lr=0.02)
+    opt_adam = optim.AdamW(params_1d, lr=0.002, weight_decay=1e-4)
+    
+    # Cosine Annealing learning rate schedulers
+    scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=100)
+    scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=100)
     criterion = nn.MSELoss()
     
     print(f"\nTraining EML-KAN to copy the {args.model} FFN behavior (100 epochs)...")
@@ -159,14 +226,17 @@ def main():
         kan_replica.train()
         epoch_loss = 0.0
         for batch_x, batch_y in loader:
-            optimizer.zero_grad()
+            opt_muon.zero_grad()
+            opt_adam.zero_grad()
             outputs = kan_replica(batch_x)
             loss = criterion(outputs, batch_y)
             loss.backward()
-            optimizer.step()
+            opt_muon.step()
+            opt_adam.step()
             epoch_loss += loss.item()
             
-        scheduler.step()
+        scheduler_muon.step()
+        scheduler_adam.step()
             
         if (epoch + 1) % 10 == 0 or epoch == 0:
             kan_replica.eval()
@@ -175,7 +245,7 @@ def main():
                 test_loss = criterion(test_outputs, Y_test).item()
                 cos_sim = F.cosine_similarity(test_outputs, Y_test).mean().item()
                 
-            print(f"Epoch {epoch+1:02d}/100 | Train Loss: {epoch_loss/len(loader):.6f} | Test MSE: {test_loss:.6f} | Alignment (Cosine Sim): {cos_sim*100.0:.2f}% | LR: {scheduler.get_last_lr()[0]:.6f}")
+            print(f"Epoch {epoch+1:02d}/100 | Train Loss: {epoch_loss/len(loader):.6f} | Test MSE: {test_loss:.6f} | Alignment (Cosine Sim): {cos_sim*100.0:.2f}% | Muon LR: {scheduler_muon.get_last_lr()[0]:.6f}")
             
     # Report final findings
     print("\n" + "=" * 60)
