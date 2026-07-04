@@ -111,9 +111,9 @@ class EMLKANMobileNetCifar(nn.Module):
         weights = MobileNet_V3_Small_Weights.DEFAULT
         self.backbone = mobilenet_v3_small(weights=weights).features
         
-        # Freeze backbone weights
+        # Keep backbone trainable for fine-tuning
         for param in self.backbone.parameters():
-            param.requires_grad = False
+            param.requires_grad = True
             
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
         self.classifier = EMLKANLinear(576, num_classes, num_components=num_components)
@@ -177,18 +177,21 @@ def main():
     print(f"Training using device: {device}")
     
     transform_train = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
+        transforms.Resize((224, 224)), # Resize to match MobileNetV3 input expectation
+        transforms.RandomCrop(224, padding=28),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
     transform_test = transforms.Compose([
+        transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
-    batch_size = 1024 if torch.cuda.is_available() else 128
+    # Scale batch size to 256 for optimal update steps on 224x224 input sizes
+    batch_size = 256 if torch.cuda.is_available() else 64
     num_workers = 8 if torch.cuda.is_available() else 2
     
     print("Loading CIFAR-100 dataset...")
@@ -198,7 +201,7 @@ def main():
     full_testset = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform_test)
     c100_testloader = torch.utils.data.DataLoader(full_testset, batch_size=100, shuffle=False, num_workers=2)
     
-    # Instantiate the pre-trained MobileNetV3 + EML-KAN model
+    # Instantiate MobileNetV3 + EML-KAN
     model = EMLKANMobileNetCifar(num_classes=100).to(device)
     criterion = nn.CrossEntropyLoss()
     
@@ -209,19 +212,24 @@ def main():
         print(f"torch.compile failed, using eager execution: {e}")
         compiled_model = model
         
-    # Only train the active classifier parameters
-    params_2d = [p for name, p in model.named_parameters() if p.requires_grad and p.ndim >= 2]
-    params_1d = [p for name, p in model.named_parameters() if p.requires_grad and p.ndim < 2]
+    # Group parameters for fine-tuning
+    params_classifier_2d = [p for p in model.classifier.parameters() if p.requires_grad and p.ndim >= 2]
+    params_classifier_1d = [p for p in model.classifier.parameters() if p.requires_grad and p.ndim < 2]
+    params_backbone = [p for p in model.backbone.parameters() if p.requires_grad]
     
-    opt_muon = Muon(params_2d, lr=0.03)
-    opt_adam = optim.AdamW(params_1d, lr=0.003, weight_decay=1e-4)
+    opt_muon = Muon(params_classifier_2d, lr=0.03)
+    # Train backbone weights with a very low learning rate to preserve features
+    opt_adam = optim.AdamW([
+        {'params': params_classifier_1d, 'lr': 0.003},
+        {'params': params_backbone, 'lr': 0.0003}
+    ], weight_decay=1e-4)
     
     scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=30)
     scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=30)
     
     scaler = torch.amp.GradScaler('cuda')
     
-    print("\n--- Training EML-KAN Classifier (30 epochs) ---")
+    print("\n--- Training EML-KAN MobileNet Classifier (30 epochs) ---")
     for epoch in range(30):
         model.train()
         running_loss = 0.0
@@ -277,13 +285,13 @@ def main():
     model.to("cpu")
     generate_esp32_header(model, "large_scale_experiment/esp32_cifar100_inference.h")
     
-    # Export full model to ONNX for TFLite compilation
+    # Export full model to ONNX
     try:
         print("Exporting full model to ONNX...")
-        dummy_input = torch.randn(1, 3, 32, 32)
+        dummy_input = torch.randn(1, 3, 224, 224)
         torch.onnx.export(model, dummy_input, "large_scale_experiment/eml_kan_mobilenet.onnx", 
                           input_names=['input'], output_names=['output'],
-                          opset_version=14)
+                          opset_version=12) # Use basic opset 12 for maximum compatibility
         print("ONNX model exported successfully to large_scale_experiment/eml_kan_mobilenet.onnx")
     except Exception as e:
         print(f"ONNX export failed: {e}")
