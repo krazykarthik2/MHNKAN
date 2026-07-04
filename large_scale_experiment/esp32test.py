@@ -92,12 +92,6 @@ def main():
     
     # Load CIFAR-100 test dataset
     print("Loading CIFAR-100 test dataset...")
-    # Override official Toronto CS mirrors with robust GitHub and HuggingFace mirrors to prevent 503 HTTP errors
-    torchvision.datasets.CIFAR100.mirrors = [
-        "https://raw.githubusercontent.com/uoip/cifar-mirror/master/",
-        "https://huggingface.co/datasets/cifar100/resolve/main/",
-        "https://www.cs.toronto.edu/~kriz/"
-    ]
     # Add random transformations: slight shift, rotation, horizontal flip
     transform = transforms.Compose([
         transforms.Resize((128, 128)),
@@ -108,7 +102,14 @@ def main():
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
-    testset = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform)
+    # Check parent directories for pre-existing local CIFAR-100 datasets
+    data_root = "./data"
+    for path in ["./data", "../data", "../../data"]:
+        if os.path.exists(os.path.join(path, "cifar-100-python")):
+            data_root = path
+            break
+            
+    testset = torchvision.datasets.CIFAR100(root=data_root, train=False, download=True, transform=transform)
     
     # Output file setup
     csv_file = "large_scale_experiment/output.csv"

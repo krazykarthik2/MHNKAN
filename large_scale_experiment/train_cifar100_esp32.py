@@ -211,16 +211,17 @@ def main():
     num_workers = 2
     
     print("Loading CIFAR-100 dataset...")
-    # Override official Toronto CS mirrors with robust GitHub and HuggingFace mirrors to prevent 503 HTTP errors
-    torchvision.datasets.CIFAR100.mirrors = [
-        "https://raw.githubusercontent.com/uoip/cifar-mirror/master/",
-        "https://huggingface.co/datasets/cifar100/resolve/main/",
-        "https://www.cs.toronto.edu/~kriz/"
-    ]
-    full_trainset = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_train)
+    # Check parent directories for pre-existing local CIFAR-100 datasets
+    data_root = "./data"
+    for path in ["./data", "../data", "../../data"]:
+        if os.path.exists(os.path.join(path, "cifar-100-python")):
+            data_root = path
+            break
+            
+    full_trainset = torchvision.datasets.CIFAR100(root=data_root, train=True, download=True, transform=transform_train)
     c100_trainloader = torch.utils.data.DataLoader(full_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     
-    full_testset = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform_test)
+    full_testset = torchvision.datasets.CIFAR100(root=data_root, train=False, download=True, transform=transform_test)
     c100_testloader = torch.utils.data.DataLoader(full_testset, batch_size=100, shuffle=False, num_workers=2)
     
     # Instantiate MobileNetV3 + EML-KAN
