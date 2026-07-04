@@ -303,7 +303,12 @@ def main():
     model.to("cpu")
     torch.save(model.state_dict(), "large_scale_experiment/eml_kan_model.pth")
     print("Saved trained model weights to large_scale_experiment/eml_kan_model.pth")
-    generate_esp32_header(model, "large_scale_experiment/esp32_cifar100_inference.h")
+    
+    header_path = "large_scale_experiment/esp32_project/esp32_cifar100_inference.h"
+    if not os.path.exists("large_scale_experiment/esp32_project"):
+        header_path = "esp32_project/esp32_cifar100_inference.h"
+        
+    generate_esp32_header(model, header_path)
     
     # Export full model to ONNX
     try:
