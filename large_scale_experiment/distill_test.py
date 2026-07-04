@@ -108,9 +108,9 @@ def main():
             return y
         orig_params = d_model * d_ffn + d_ffn * d_model + d_ffn + d_model
 
-    # Create EML-KAN replica (mapping d_model -> d_model directly)
-    print(f"\nInitializing EML-KAN replica model ({d_model} -> {d_model})...")
-    kan_replica = EMLKANLinear(d_model, d_model, num_components=2)
+    # Create EML-KAN replica (mapping d_model -> d_model directly with K=3)
+    print(f"\nInitializing EML-KAN replica model ({d_model} -> {d_model} | K=3)...")
+    kan_replica = EMLKANLinear(d_model, d_model, num_components=3)
     
     # Generate Synthetic Calibration Data (Zero-Data Distillation)
     # We generate pure normal random vectors - NO real sentences or datasets!
@@ -134,13 +134,15 @@ def main():
     X_test, Y_test = X_test.to(device), Y_test.to(device)
     
     optimizer = optim.Adam(kan_replica.parameters(), lr=0.01)
+    # Cosine Annealing learning rate scheduler for stable convergence
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
     criterion = nn.MSELoss()
     
-    print(f"\nTraining EML-KAN to copy the {args.model} FFN behavior (50 epochs)...")
+    print(f"\nTraining EML-KAN to copy the {args.model} FFN behavior (100 epochs)...")
     dataset = torch.utils.data.TensorDataset(X_train, Y_train)
     loader = torch.utils.data.DataLoader(dataset, batch_size=256, shuffle=True)
     
-    for epoch in range(50):
+    for epoch in range(100):
         kan_replica.train()
         epoch_loss = 0.0
         for batch_x, batch_y in loader:
@@ -151,6 +153,8 @@ def main():
             optimizer.step()
             epoch_loss += loss.item()
             
+        scheduler.step()
+            
         if (epoch + 1) % 10 == 0 or epoch == 0:
             kan_replica.eval()
             with torch.no_grad():
@@ -158,7 +162,7 @@ def main():
                 test_loss = criterion(test_outputs, Y_test).item()
                 cos_sim = F.cosine_similarity(test_outputs, Y_test).mean().item()
                 
-            print(f"Epoch {epoch+1:02d}/50 | Train Loss: {epoch_loss/len(loader):.6f} | Test MSE: {test_loss:.6f} | Alignment (Cosine Sim): {cos_sim*100.0:.2f}%")
+            print(f"Epoch {epoch+1:02d}/100 | Train Loss: {epoch_loss/len(loader):.6f} | Test MSE: {test_loss:.6f} | Alignment (Cosine Sim): {cos_sim*100.0:.2f}% | LR: {scheduler.get_last_lr()[0]:.6f}")
             
     # Report final findings
     print("\n" + "=" * 60)
@@ -166,7 +170,7 @@ def main():
     print(f"Target Model: {model_name}")
     print(f"Layer Mapping: FFN Block ({d_model} -> {d_ffn} -> {d_model})")
     print(f"Original FFN Parameters: {orig_params:,} weights")
-    print(f"EML-KAN Replica Parameters: {d_model * d_model * 11:,} weights (Before Sparsity)")
+    print(f"EML-KAN Replica Parameters: {d_model * d_model * 16:,} weights (Before Sparsity)")
     print(f"Final Test Mean Squared Error (MSE): {test_loss:.6f}")
     print(f"Behavioral Similarity: {cos_sim*100.0:.2f}%")
     print("=" * 60)
