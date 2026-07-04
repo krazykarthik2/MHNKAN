@@ -16,19 +16,19 @@ void evaluate_eml_kan_classifier(const float* features, float* output_logits) {
     for (int c = 0; c < 100; c++) {
         float z = 0.0f;
         for (int i = 0; i < 576; i++) {
-            float weight = (float)((int8_t)pgm_read_byte(&FC_WEIGHTS_QUANT[c * 576 + i])) * FC_SCALE;
+            float weight = (float)FC_WEIGHTS_QUANT[c * 576 + i] * FC_SCALE;
             z += weight * features[i];
         }
         
-        float weight_base = pgm_read_float(&ACT3_W_BASE[c]);
+        float weight_base = ACT3_W_BASE[c];
         float out = weight_base * z;
         
         for (int k = 0; k < 2; k++) {
-            float a = pgm_read_float(&ACT3_A[c * 2 + k]);
-            float b = pgm_read_float(&ACT3_B[c * 2 + k]);
-            float c_param = pgm_read_float(&ACT3_C[c * 2 + k]);
-            float d = pgm_read_float(&ACT3_D[c * 2 + k]);
-            float w_eml = pgm_read_float(&ACT3_W_EML[c * 2 + k]);
+            float a = ACT3_A[c * 2 + k];
+            float b = ACT3_B[c * 2 + k];
+            float c_param = ACT3_C[c * 2 + k];
+            float d = ACT3_D[c * 2 + k];
+            float w_eml = ACT3_W_EML[c * 2 + k];
             
             float arg_x = a * z + b;
             if (arg_x < -10.0f) arg_x = -10.0f;

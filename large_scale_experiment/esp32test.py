@@ -83,9 +83,12 @@ def main():
     print("Loading local trained model weights...")
     model = EMLKANMobileNetCifar(num_classes=100)
     model_path = "large_scale_experiment/eml_kan_model.pth"
+    if not os.path.exists(model_path):
+        model_path = "eml_kan_model.pth"
+        
     if os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path, map_location='cpu'))
-        print("Trained weights loaded successfully.")
+        print(f"Trained weights loaded successfully from {model_path}.")
     else:
         print(f"Warning: {model_path} not found. Running with random weights.")
     model.eval()
@@ -95,23 +98,18 @@ def main():
     # Add random transformations: slight shift, rotation, horizontal flip
     transform = transforms.Compose([
         transforms.Resize((128, 128)),
-        transforms.RandomRotation(15),
-        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
-        transforms.RandomHorizontalFlip(),
+        # transforms.RandomRotation(15),
+        # transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+        # transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
+        # transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
-    
+    # transform = None
     data_root = "./data"
-    torchvision.datasets.CIFAR100.mirrors = [
-        "https://huggingface.co/datasets/nakroy/cifar100-python/resolve/main/",
-        "https://raw.githubusercontent.com/uoip/cifar-mirror/master/",
-        "https://www.cs.toronto.edu/~kriz/"
-    ]
-    testset = torchvision.datasets.CIFAR100(root=data_root, train=False, download=True, transform=transform)
+    testset = torchvision.datasets.CIFAR100(root=data_root, train=False, transform=transform)
     
     # Output file setup
-    csv_file = "large_scale_experiment/output.csv"
+    csv_file = "./output.csv"
     csv_header = ["Sample_Idx", "True_Label", "PyTorch_Pred", "ESP32_Pred", "ESP32_Latency_us", "Match"]
     
     with open(csv_file, mode="w", newline="") as f:
