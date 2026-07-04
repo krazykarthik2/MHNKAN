@@ -295,6 +295,8 @@ def main():
                 param[torch.abs(param) < 0.05] = 0.0
                 
     model.to("cpu")
+    torch.save(model.state_dict(), "large_scale_experiment/eml_kan_model.pth")
+    print("Saved trained model weights to large_scale_experiment/eml_kan_model.pth")
     generate_esp32_header(model, "large_scale_experiment/esp32_cifar100_inference.h")
     
     # Export full model to ONNX

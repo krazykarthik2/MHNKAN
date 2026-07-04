@@ -14,14 +14,12 @@ inline float softplus_val(float z) {
 void evaluate_eml_kan_classifier(const float* features, float* output_logits) {
     // There are 100 classes
     for (int c = 0; c < 100; c++) {
-        // 1. Compute de-quantized linear dot product: z = Sum(W_quant * scale * x)
         float z = 0.0f;
         for (int i = 0; i < 576; i++) {
-            float weight = (float)pgm_read_byte(&FC_WEIGHTS_QUANT[c * 576 + i]) * FC_SCALE;
+            float weight = (float)((int8_t)pgm_read_byte(&FC_WEIGHTS_QUANT[c * 576 + i])) * FC_SCALE;
             z += weight * features[i];
         }
         
-        // 2. Apply EML-KAN Activation Function with K=2 components
         float weight_base = pgm_read_float(&ACT3_W_BASE[c]);
         float out = weight_base * z;
         
@@ -32,7 +30,6 @@ void evaluate_eml_kan_classifier(const float* features, float* output_logits) {
             float d = pgm_read_float(&ACT3_D[c * 2 + k]);
             float w_eml = pgm_read_float(&ACT3_W_EML[c * 2 + k]);
             
-            // Stable clamped exponential and softplus evaluation
             float arg_x = a * z + b;
             if (arg_x < -10.0f) arg_x = -10.0f;
             if (arg_x > 10.0f) arg_x = 10.0f;
@@ -48,40 +45,52 @@ void evaluate_eml_kan_classifier(const float* features, float* output_logits) {
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("ESP32 EML-KAN Quantized Classifier Benchmark Start!");
+    Serial.println("ESP32 EML-KAN Serial HIL Tester Ready!");
 }
 
 void loop() {
-    // Generate dummy extracted feature vector (576 elements) representing a test image
-    float dummy_features[576];
-    for (int i = 0; i < 576; i++) {
-        dummy_features[i] = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f; // range [-1.0, 1.0]
-    }
-    
-    float logits[100];
-    
-    // Benchmark latency
-    unsigned long start_time = micros();
-    evaluate_eml_kan_classifier(dummy_features, logits);
-    unsigned long duration = micros() - start_time;
-    
-    // Find the predicted class (highest logit)
-    int max_class = 0;
-    float max_logit = logits[0];
-    for (int c = 1; c < 100; c++) {
-        if (logits[c] > max_logit) {
-            max_logit = logits[c];
-            max_class = c;
+    // Check if sync command "SYNC" is received
+    if (Serial.find("SYNC")) {
+        float features[576];
+        byte* feature_bytes = (byte*)features;
+        int expected_bytes = 2304; // 576 * sizeof(float)
+        
+        // Wait and read the binary feature array from Serial
+        int bytes_read = 0;
+        unsigned long timeout_start = millis();
+        while (bytes_read < expected_bytes && (millis() - timeout_start) < 3000) {
+            if (Serial.available() > 0) {
+                feature_bytes[bytes_read] = Serial.read();
+                bytes_read++;
+            }
+        }
+        
+        if (bytes_read == expected_bytes) {
+            float logits[100];
+            
+            // Measure dequantized classification duration
+            unsigned long start_time = micros();
+            evaluate_eml_kan_classifier(features, logits);
+            unsigned long duration = micros() - start_time;
+            
+            // Find predicted class index (highest logit)
+            int max_class = 0;
+            float max_logit = logits[0];
+            for (int c = 1; c < 100; c++) {
+                if (logits[c] > max_logit) {
+                    max_logit = logits[c];
+                    max_class = c;
+                }
+            }
+            
+            // Send prediction and latency back to the Python script
+            Serial.print("PRED: ");
+            Serial.print(max_class);
+            Serial.print(" TIME: ");
+            Serial.println(duration);
+        } else {
+            // Error handling for timeout
+            Serial.println("PRED: -1 TIME: 0 (TIMEOUT)");
         }
     }
-    
-    Serial.print("Predicted Class: ");
-    Serial.print(max_class);
-    Serial.print(" | Max Logit: ");
-    Serial.print(max_logit, 4);
-    Serial.print(" | Execution Latency: ");
-    Serial.print(duration);
-    Serial.println(" us");
-    
-    delay(1000);
 }
