@@ -234,13 +234,13 @@ def main():
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
     
-    batch_size = 1024 if torch.cuda.is_available() else 128
+    batch_size = 128
     num_workers = 8 if torch.cuda.is_available() else 2
     
     # Load CIFAR-100 once for both stages
     print("Loading CIFAR-100 dataset...")
-    full_trainset = torchvision.datasets.CIFAR100(root='./data_c100', train=True, download=True, transform=transform_train)
-    full_testset = torchvision.datasets.CIFAR100(root='./data_c100', train=False, download=True, transform=transform_test)
+    full_trainset = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_train)
+    full_testset = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform_test)
     
     # ------------------ STAGE 1: PRE-TRAINING ON CIFAR-100 SUBSET (CLASSES 0-19) ------------------
     print(f"\n--- STAGE 1: Pre-training on CIFAR-100 Subset (Classes 0-19) | Batch Size: {batch_size} ---")
@@ -266,12 +266,12 @@ def main():
     opt_muon = Muon(params_2d, lr=0.03)
     opt_adam = optim.AdamW(params_1d, lr=0.003, weight_decay=1e-4)
     
-    scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=15)
-    scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=15)
+    scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=30)
+    scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=30)
     
     scaler = torch.amp.GradScaler('cuda')
     
-    for epoch in range(15):
+    for epoch in range(30):
         model.train()
         running_loss = 0.0
         correct = 0
@@ -301,10 +301,10 @@ def main():
             
         scheduler_muon.step()
         scheduler_adam.step()
-        print(f"Subset Epoch {epoch+1}/15 | Loss: {running_loss/len(subset_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
+        print(f"Subset Epoch {epoch+1}/30 | Loss: {running_loss/len(subset_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
         
     # ------------------ STAGE 2: CIFAR-100 FULL FINE-TUNING ------------------
-    print(f"\n--- STAGE 2: Transfer Learning to Full CIFAR-100 (30 epochs) | Batch Size: {batch_size} ---")
+    print(f"\n--- STAGE 2: Transfer Learning to Full CIFAR-100 (80 epochs) | Batch Size: {batch_size} ---")
     c100_trainloader = torch.utils.data.DataLoader(full_trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     c100_testloader = torch.utils.data.DataLoader(full_testset, batch_size=100, shuffle=False, num_workers=2)
     
@@ -325,12 +325,12 @@ def main():
     opt_muon_c100 = Muon(params_2d_c100, lr=0.01)
     opt_adam_c100 = optim.AdamW(params_1d_c100, lr=0.001, weight_decay=1e-4)
     
-    scheduler_muon_c100 = optim.lr_scheduler.CosineAnnealingLR(opt_muon_c100, T_max=30)
-    scheduler_adam_c100 = optim.lr_scheduler.CosineAnnealingLR(opt_adam_c100, T_max=30)
+    scheduler_muon_c100 = optim.lr_scheduler.CosineAnnealingLR(opt_muon_c100, T_max=80)
+    scheduler_adam_c100 = optim.lr_scheduler.CosineAnnealingLR(opt_adam_c100, T_max=80)
     
     scaler_c100 = torch.amp.GradScaler('cuda')
     
-    for epoch in range(30):
+    for epoch in range(80):
         model_c100.train()
         running_loss = 0.0
         correct = 0
@@ -366,7 +366,7 @@ def main():
             
         scheduler_muon_c100.step()
         scheduler_adam_c100.step()
-        print(f"CIFAR-100 Fine-Tuning Epoch {epoch+1}/30 | Loss: {running_loss/len(c100_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
+        print(f"CIFAR-100 Fine-Tuning Epoch {epoch+1}/80 | Loss: {running_loss/len(c100_trainloader):.4f} | Accuracy: {100.0*correct/total:.2f}%")
         
     # Evaluate CIFAR-100 model
     model_c100.eval()
