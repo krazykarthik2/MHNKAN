@@ -46,6 +46,14 @@ void setup() {
     Serial.begin(115200);
     delay(1000);
     Serial.println("ESP32 EML-KAN Serial HIL Tester Ready!");
+    
+    // Sanity check to verify memory alignment and read accuracy
+    Serial.print("INIT_CHECK: scale=");
+    Serial.print(FC_SCALE, 8);
+    Serial.print(" weight_0=");
+    Serial.print(FC_WEIGHTS_QUANT[0]);
+    Serial.print(" base_0=");
+    Serial.println(ACT3_W_BASE[0], 6);
 }
 
 void loop() {

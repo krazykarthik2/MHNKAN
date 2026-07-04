@@ -71,9 +71,18 @@ def main():
     print(f"Connecting to ESP32 on port {args.port} at {args.baud} baud...")
     try:
         ser = serial.Serial(args.port, args.baud, timeout=5)
-        time.sleep(2) # Wait for ESP32 reboot handshake
-        ser.reset_input_buffer()
-        print("Connected successfully!")
+        print("Connected! Waiting for ESP32 boot logs and sanity check...")
+        
+        # Read and print boot logs for 3 seconds or until we see "HIL Tester Ready!"
+        start_time = time.time()
+        while time.time() - start_time < 3.0:
+            if ser.in_waiting > 0:
+                line = ser.readline().decode('utf-8', errors='ignore').strip()
+                print(f"  [ESP32 Boot] {line}")
+                if "HIL Tester Ready!" in line:
+                    break
+                    
+        print("ESP32 ready. Proceeding to evaluation.")
     except Exception as e:
         print(f"Failed to connect to Serial port: {e}")
         print("Make sure your ESP32 is plugged in and you specified the correct port.")
