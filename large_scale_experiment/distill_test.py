@@ -40,6 +40,19 @@ class EMLKANLinear(nn.Module):
     def forward(self, x):
         return self.act(self.linear(x))
 
+class EMLKANFFNReplica(nn.Module):
+    """
+    2-Layer Compositional EML-KAN to match the mathematical depth of standard FFNs.
+    Maps d_model ➔ d_model ➔ d_model.
+    """
+    def __init__(self, d_model, num_components=2):
+        super().__init__()
+        self.layer1 = EMLKANLinear(d_model, d_model, num_components=num_components)
+        self.layer2 = EMLKANLinear(d_model, d_model, num_components=num_components)
+        
+    def forward(self, x):
+        return self.layer2(self.layer1(x))
+
 # 2. Main Distillation Script
 
 def main():
@@ -108,9 +121,9 @@ def main():
             return y
         orig_params = d_model * d_ffn + d_ffn * d_model + d_ffn + d_model
 
-    # Create EML-KAN replica (mapping d_model -> d_model directly with K=3)
-    print(f"\nInitializing EML-KAN replica model ({d_model} -> {d_model} | K=3)...")
-    kan_replica = EMLKANLinear(d_model, d_model, num_components=3)
+    # Create 2-layer EML-KAN replica (mapping d_model -> d_model -> d_model)
+    print(f"\nInitializing 2-layer EML-KAN FFN replica model ({d_model} -> {d_model} -> {d_model} | K=2)...")
+    kan_replica = EMLKANFFNReplica(d_model, num_components=2)
     
     # Generate Synthetic Calibration Data (Zero-Data Distillation)
     # We generate pure normal random vectors - NO real sentences or datasets!
@@ -170,7 +183,7 @@ def main():
     print(f"Target Model: {model_name}")
     print(f"Layer Mapping: FFN Block ({d_model} -> {d_ffn} -> {d_model})")
     print(f"Original FFN Parameters: {orig_params:,} weights")
-    print(f"EML-KAN Replica Parameters: {d_model * d_model * 16:,} weights (Before Sparsity)")
+    print(f"EML-KAN Replica Parameters: {d_model * d_model * 11 * 2:,} weights (Before Sparsity)")
     print(f"Final Test Mean Squared Error (MSE): {test_loss:.6f}")
     print(f"Behavioral Similarity: {cos_sim*100.0:.2f}%")
     print("=" * 60)
