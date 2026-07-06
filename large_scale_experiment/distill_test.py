@@ -143,21 +143,13 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
         hf_model.to(device)
         hf_model.eval()
         
-        # Setup KAN replica
-        kan_replica = EMLKANFFNReplica(d_model, num_components=2).to(device)
+        # Setup KAN replica (Increase components from 2 to 4 for higher representational capacity)
+        kan_replica = EMLKANFFNReplica(d_model, num_components=4).to(device)
         
-        # Generate Synthetic Calibration Data (Zero-Data Distillation)
-        X_train = torch.randn(50000, d_model).to(device)
-        Y_train = original_ffn(X_train)
-        
+        # Test baseline static set
         X_test = torch.randn(2000, d_model).to(device)
         Y_test = original_ffn(X_test)
         
-        # Free host memory of target model once targets are computed
-        del hf_model
-        if device.type == 'cuda':
-            torch.cuda.empty_cache()
-            
         # Group parameters
         params_2d = []
         params_1d = []
@@ -168,22 +160,30 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
                 else:
                     params_1d.append(p)
                     
-        opt_muon = Muon(params_2d, lr=0.02)
-        opt_adam = optim.AdamW(params_1d, lr=0.002, weight_decay=1e-4)
+        # Optimize learning rates for deeper KAN fitting
+        opt_muon = Muon(params_2d, lr=0.05)
+        opt_adam = optim.AdamW(params_1d, lr=0.005, weight_decay=1e-4)
         
-        scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=100)
-        scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=100)
+        # Train for 300 epochs to squeeze out last 1% error
+        epochs = 300
+        scheduler_muon = optim.lr_scheduler.CosineAnnealingLR(opt_muon, T_max=epochs)
+        scheduler_adam = optim.lr_scheduler.CosineAnnealingLR(opt_adam, T_max=epochs)
         criterion = nn.MSELoss()
         
-        dataset = torch.utils.data.TensorDataset(X_train, Y_train)
-        loader = torch.utils.data.DataLoader(dataset, batch_size=256, shuffle=True)
+        batches_per_epoch = 200
+        batch_size = 256
         
-        for epoch in range(100):
+        for epoch in range(epochs):
             kan_replica.train()
             epoch_loss = 0.0
-            for batch_x, batch_y in loader:
+            for _ in range(batches_per_epoch):
                 opt_muon.zero_grad()
                 opt_adam.zero_grad()
+                
+                # Infinite dynamic calibration data generation
+                batch_x = torch.randn(batch_size, d_model).to(device)
+                batch_y = original_ffn(batch_x)
+                
                 outputs = kan_replica(batch_x)
                 loss = criterion(outputs, batch_y)
                 loss.backward()
@@ -194,13 +194,13 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
             scheduler_muon.step()
             scheduler_adam.step()
             
-            if (epoch + 1) % 25 == 0 or epoch == 0:
+            if (epoch + 1) % 50 == 0 or epoch == 0:
                 kan_replica.eval()
                 with torch.no_grad():
                     test_outputs = kan_replica(X_test)
                     test_loss = criterion(test_outputs, Y_test).item()
                     cos_sim = F.cosine_similarity(test_outputs, Y_test).mean().item()
-                print(f"[Layer {layer_idx} | Device {device_str}] Epoch {epoch+1:02d}/100 | Train Loss: {epoch_loss/len(loader):.6f} | Test MSE: {test_loss:.6f} | Cosine Sim: {cos_sim*100.0:.2f}%")
+                print(f"[Layer {layer_idx} | Device {device_str}] Epoch {epoch+1:03d}/{epochs} | Train Loss: {epoch_loss/batches_per_epoch:.6f} | Test MSE: {test_loss:.6f} | Cosine Sim: {cos_sim*100.0:.2f}%")
                 
         # Final evaluation
         kan_replica.eval()
@@ -217,7 +217,7 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
         print(f"[Layer {layer_idx} | Device {device_str}] Done! Final Cosine Similarity: {final_cos_sim*100.0:.2f}%")
         
         # Cleanup KAN variables
-        del kan_replica, X_train, Y_train, X_test, Y_test
+        del kan_replica, X_test, Y_test
         if device.type == 'cuda':
             torch.cuda.empty_cache()
             
