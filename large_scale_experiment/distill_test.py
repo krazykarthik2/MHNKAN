@@ -209,6 +209,12 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
             final_test_loss = criterion(test_outputs, Y_test).item()
             final_cos_sim = F.cosine_similarity(test_outputs, Y_test).mean().item()
             
+        # Save distilled layer model weights
+        os.makedirs("distilled_weights", exist_ok=True)
+        save_path = f"distilled_weights/layer_{layer_idx}.pth"
+        torch.save(kan_replica.state_dict(), save_path)
+        print(f"[Layer {layer_idx} | Device {device_str}] Saved weights to {save_path}")
+        
         return_dict[layer_idx] = {
             "final_mse": final_test_loss,
             "final_cos_sim": final_cos_sim,
@@ -309,6 +315,7 @@ def main():
     print(f"Average Model Alignment (Cosine Similarity): {100.0 * total_cos_sim / num_layers:.2f}%")
     print("=" * 80)
     print("All layers distilled successfully!")
+    
 
 if __name__ == "__main__":
     main()
