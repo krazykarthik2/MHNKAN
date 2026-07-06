@@ -212,7 +212,7 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
         return_dict[layer_idx] = {
             "final_mse": final_test_loss,
             "final_cos_sim": final_cos_sim,
-            "replica_params": d_model * d_model * 11 * 2
+            "replica_params": sum(p.numel() for p in kan_replica.parameters() if p.requires_grad)
         }
         print(f"[Layer {layer_idx} | Device {device_str}] Done! Final Cosine Similarity: {final_cos_sim*100.0:.2f}%")
         
