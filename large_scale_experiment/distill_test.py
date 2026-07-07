@@ -302,11 +302,15 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
                 batch_y = original_ffn(batch_x)
                 
                 outputs = kan_replica(batch_x)
-                loss = criterion(outputs, batch_y)
+                # Joint Loss Objective: MSE + (1.0 - Cosine Proximity)
+                mse_loss = criterion(outputs, batch_y)
+                cos_loss = 1.0 - F.cosine_similarity(outputs, batch_y, dim=-1).mean()
+                loss = mse_loss + cos_loss
+                
                 loss.backward()
                 opt_muon.step()
                 opt_adam.step()
-                epoch_loss += loss.item()
+                epoch_loss += mse_loss.item()
                 
             scheduler_muon.step()
             scheduler_adam.step()
