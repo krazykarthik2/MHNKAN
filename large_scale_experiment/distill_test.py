@@ -118,7 +118,7 @@ class Muon(optim.Optimizer):
 # 2. Define EML-KAN Layers
 
 class EMLKANActivation(nn.Module):
-    def __init__(self, channels, num_components=2):
+    def __init__(self, channels, num_components=4):
         super().__init__()
         self.channels = channels
         self.num_components = num_components
