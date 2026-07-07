@@ -252,6 +252,8 @@ def main():
     parser.add_argument("--model", type=str, default="bert-small", 
                         choices=["bert-tiny", "bert-small", "gpt2"],
                         help="Hugging Face model to distill: bert-tiny (4 layers), bert-small (4 layers), or gpt2 (12 layers)")
+    parser.add_argument("--workers-per-gpu", type=int, default=4,
+                        help="Number of parallel worker processes to run on each GPU (default: 4)")
     args = parser.parse_args()
     
     print("Zero-Data FFN Layer Dynamic Queue Parallelized Distillation")
@@ -291,14 +293,19 @@ def main():
     for idx in range(num_layers):
         task_queue.put(idx)
         
-    # Spawn exactly one persistent worker per available GPU (or 1 on CPU if none)
-    num_workers = max(1, num_gpus)
+    # Spawn multiple persistent workers per available GPU to fully utilize compute/memory
+    if num_gpus > 0:
+        num_workers = num_gpus * args.workers_per_gpu
+    else:
+        num_workers = 1
+        
     processes = []
     
-    print(f"Spawning {num_workers} persistent worker processes...")
+    print(f"Spawning {num_workers} persistent worker processes ({args.workers_per_gpu} per GPU)...")
     for worker_id in range(num_workers):
         if num_gpus > 0:
-            device_str = f"cuda:{worker_id}"
+            device_id = worker_id % num_gpus
+            device_str = f"cuda:{device_id}"
         else:
             device_str = "cpu"
             
