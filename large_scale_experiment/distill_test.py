@@ -140,7 +140,7 @@ class EMLKANActivation(nn.Module):
         return out
 
 class EMLKANLinear(nn.Module):
-    def __init__(self, in_features, out_features, num_components=2):
+    def __init__(self, in_features, out_features, num_components=4):
         super().__init__()
         self.linear = nn.Linear(in_features, out_features, bias=False)
         self.act = EMLKANActivation(out_features, num_components)
@@ -149,7 +149,7 @@ class EMLKANLinear(nn.Module):
         return self.act(self.linear(x))
 
 class EMLKANFFNReplica(nn.Module):
-    def __init__(self, d_model, num_components=2):
+    def __init__(self, d_model, num_components=4):
         super().__init__()
         self.layer1 = EMLKANLinear(d_model, d_model, num_components=num_components)
         self.layer2 = EMLKANLinear(d_model, d_model, num_components=num_components)

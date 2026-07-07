@@ -45,11 +45,10 @@ class EMLKANFFNReplica(nn.Module):
     def __init__(self, d_model, num_components=4):
         super().__init__()
         self.layer1 = EMLKANLinear(d_model, d_model, num_components=num_components)
-        self.ln = nn.LayerNorm(d_model)
         self.layer2 = EMLKANLinear(d_model, d_model, num_components=num_components)
         
     def forward(self, x):
-        return self.layer2(self.ln(self.layer1(x)))
+        return self.layer2(self.layer1(x))
 
 def test_real_data():
     temp_dir = "temp"
