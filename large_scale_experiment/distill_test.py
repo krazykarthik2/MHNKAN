@@ -8,6 +8,60 @@ import torch.optim as optim
 import torch.multiprocessing as mp
 import numpy as np
 
+# A comprehensive list of diverse, grammatically correct sentences to calibrate self-attention layers
+CALIBRATION_CORPUS = [
+    "The quick brown fox jumps over the lazy dog.",
+    "Artificial intelligence is transforming the landscape of modern technology and edge computing.",
+    "Kolmogorov-Arnold Networks offer a promising alternative to multi-layer perceptrons.",
+    "Deep learning models require careful quantization to run on low-power microcontrollers.",
+    "We are evaluating the distillation performance of feed-forward networks in transformer models.",
+    "Python is a versatile programming language widely used in data science and web development.",
+    "The Hubble Space Telescope has captured stunning images of distant galaxies and nebulae.",
+    "Quantum computing utilizes qubits and superposition to solve complex computational problems.",
+    "Climate change poses a significant threat to global biodiversity and environmental stability.",
+    "A healthy diet and regular exercise are essential for maintaining physical and mental well-being.",
+    "The history of civilization is marked by technological innovations and cultural exchanges.",
+    "Natural language processing allows computers to understand and generate human language.",
+    "Photosynthesis is the process by which green plants convert sunlight into chemical energy.",
+    "The Great Wall of China is one of the most remarkable engineering feats in human history.",
+    "Blockchain technology provides a decentralized and secure ledger for digital transactions.",
+    "Learning a new language opens up new perspectives and opportunities for communication.",
+    "The human brain is a complex network of billions of neurons communicating via synapses.",
+    "Renewable energy sources such as solar and wind power are crucial for a sustainable future.",
+    "Good communication skills are vital for personal relationships and professional success.",
+    "The study of economics helps us understand how resources are allocated in society.",
+    "Music has the power to evoke strong emotions and connect people across different cultures.",
+    "The theory of relativity proposed by Albert Einstein revolutionized our understanding of space and time.",
+    "Proper sleep hygiene is important for cognitive function and overall health preservation.",
+    "The Amazon rainforest is home to a vast array of unique plant and animal species.",
+    "Cryptography ensures secure communication in the presence of adversarial third parties.",
+    "The scientific method involves observation, hypothesis formulation, and rigorous testing.",
+    "Urban planning plays a key role in creating livable and sustainable cities.",
+    "The discovery of penicillin by Alexander Fleming marked a turning point in medicine.",
+    "Virtual reality creates immersive digital environments for gaming, education, and training.",
+    "A positive attitude and perseverance can help individuals overcome major challenges in life.",
+    "The ocean covers more than seventy percent of the Earth's surface and remains largely unexplored.",
+    "Machine learning algorithms can identify patterns in large datasets to make predictions.",
+    "The printing press invented by Johannes Gutenberg democratized access to information.",
+    "Self-driving cars use sensors and artificial intelligence to navigate roads safely.",
+    "The study of philosophy encourages critical thinking and questioning of fundamental assumptions.",
+    "Biodegradable materials can help reduce plastic pollution and protect marine life.",
+    "The internet has revolutionized the way we access information and communicate globally.",
+    "A balanced ecosystem requires a delicate harmony between predators and prey.",
+    "Microprocessors are the brain of modern electronic devices, from smartphones to supercomputers.",
+    "The renaissance was a period of intense artistic and intellectual revival in Europe.",
+    "Genomics is the study of the complete set of DNA within an organism.",
+    "Sustainable agriculture practices help conserve soil fertility and water resources.",
+    "The concept of democracy originated in ancient Greece and has evolved over centuries.",
+    "Enzyme catalysts speed up chemical reactions in biological systems without being consumed.",
+    "E-commerce has transformed the retail industry and changed consumer shopping habits.",
+    "The standard model of particle physics describes the fundamental forces of nature.",
+    "Public transport systems reduce traffic congestion and carbon emissions in urban areas.",
+    "The library is a repository of human knowledge and a hub for community learning.",
+    "Active listening is a critical component of effective leadership and teamwork.",
+    "The industrial revolution shifted economies from agrarian to industrial and manufacturing-based."
+]
+
 # 1. Define Muon Optimizer helper
 
 def newton_schulz5(G, steps=3):
@@ -111,7 +165,7 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
     print(f"[Worker {worker_id}] Started on device: {device}")
     
     # Load libraries locally
-    from transformers import AutoModel, GPT2Model
+    from transformers import AutoModel, GPT2Model, AutoTokenizer
     
     while not task_queue.empty():
         try:
@@ -155,6 +209,15 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
         kan_replica = EMLKANFFNReplica(d_model, num_components=4).to(device)
         
         # Setup dynamic tokenizer/forward hook tracking to capture real activations
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+            
+        # Tokenize calibration corpus once per worker
+        calib_enc = tokenizer(CALIBRATION_CORPUS, padding=True, truncation=True, return_tensors="pt")
+        calib_ids_base = calib_enc["input_ids"].to(device)
+        calib_mask_base = calib_enc["attention_mask"].to(device)
+        
         vocab_size = hf_model.config.vocab_size if hasattr(hf_model.config, 'vocab_size') else 30522
         
         # Hook target intermediate activations
@@ -170,23 +233,34 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
             
         def capture_real_features(size):
             activation_buffer.clear()
-            # Generate random sequence of token IDs to run model forward pass
-            # Batch size = size // 64 tokens, seq_len = 64
-            bs = max(1, size // 64)
-            seq_len = 64
-            input_ids = torch.randint(0, vocab_size, (bs, seq_len)).to(device)
+            
+            # Subsample and inject noise into token IDs to generate infinite variations
+            num_sentences = calib_ids_base.shape[0]
+            indices = torch.randperm(num_sentences)[:max(1, size // 32)]
+            
+            input_ids = calib_ids_base[indices].clone()
+            attention_mask = calib_mask_base[indices].clone()
+            
+            # Inject noise: randomly replace 15% of non-special tokens with random vocab words
+            prob = torch.rand(input_ids.shape).to(device)
+            mask = (prob < 0.15) & (input_ids != tokenizer.pad_token_id) & (input_ids != tokenizer.cls_token_id if hasattr(tokenizer, 'cls_token_id') else True) & (input_ids != tokenizer.sep_token_id if hasattr(tokenizer, 'sep_token_id') else True)
+            random_tokens = torch.randint(0, vocab_size, input_ids.shape).to(device)
+            input_ids[mask] = random_tokens[mask]
             
             with torch.no_grad():
                 if args_model == "gpt2":
                     _ = hf_model(input_ids)
                 else:
-                    # BERT
-                    _ = hf_model(input_ids, attention_mask=torch.ones_like(input_ids))
+                    _ = hf_model(input_ids, attention_mask=attention_mask)
                     
             # Concat and return activations matching size
             feats = torch.cat(activation_buffer, dim=0).view(-1, d_model)
             if feats.shape[0] > size:
                 feats = feats[:size]
+            elif feats.shape[0] < size:
+                # Pad to target size if sequence length was too short
+                repeats = (size + feats.shape[0] - 1) // feats.shape[0]
+                feats = feats.repeat(repeats, 1)[:size]
             return feats
             
         # Test baseline static set aligned with real dataset distribution
