@@ -154,14 +154,43 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
         # Setup KAN replica (Increase components from 2 to 4 for higher representational capacity)
         kan_replica = EMLKANFFNReplica(d_model, num_components=4).to(device)
         
-        # Helper to generate feature-matched zero-data inputs
-        def generate_matched_inputs(size):
-            # Normal distribution Z scaled by LayerNorm scale (weight) and shift (bias)
-            Z = torch.randn(size, d_model).to(device)
-            return Z * ln_weight + ln_bias
+        # Setup dynamic tokenizer/forward hook tracking to capture real activations
+        vocab_size = hf_model.config.vocab_size if hasattr(hf_model.config, 'vocab_size') else 30522
+        
+        # Hook target intermediate activations
+        activation_buffer = []
+        def target_hook_fn(module, input_tensor, output_tensor):
+            # Input to intermediate layer (which is LN output)
+            activation_buffer.append(input_tensor[0].detach())
             
-        # Test baseline static set aligned with analytical LayerNorm distributions
-        X_test = generate_matched_inputs(2000)
+        if args_model == "gpt2":
+            hook_handle = hf_model.h[layer_idx].mlp.register_forward_hook(target_hook_fn)
+        else:
+            hook_handle = hf_model.encoder.layer[layer_idx].intermediate.register_forward_hook(target_hook_fn)
+            
+        def capture_real_features(size):
+            activation_buffer.clear()
+            # Generate random sequence of token IDs to run model forward pass
+            # Batch size = size // 64 tokens, seq_len = 64
+            bs = max(1, size // 64)
+            seq_len = 64
+            input_ids = torch.randint(0, vocab_size, (bs, seq_len)).to(device)
+            
+            with torch.no_grad():
+                if args_model == "gpt2":
+                    _ = hf_model(input_ids)
+                else:
+                    # BERT
+                    _ = hf_model(input_ids, attention_mask=torch.ones_like(input_ids))
+                    
+            # Concat and return activations matching size
+            feats = torch.cat(activation_buffer, dim=0).view(-1, d_model)
+            if feats.shape[0] > size:
+                feats = feats[:size]
+            return feats
+            
+        # Test baseline static set aligned with real dataset distribution
+        X_test = capture_real_features(2000)
         Y_test = original_ffn(X_test)
         
         # Group parameters
@@ -194,8 +223,8 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
                 opt_muon.zero_grad()
                 opt_adam.zero_grad()
                 
-                # Infinite dynamic calibration data generation matching preceding LayerNorm scale
-                batch_x = generate_matched_inputs(batch_size)
+                # Dynamic calibration matching real attention manifolds
+                batch_x = capture_real_features(batch_size)
                 batch_y = original_ffn(batch_x)
                 
                 outputs = kan_replica(batch_x)
@@ -235,6 +264,9 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
             "replica_params": sum(p.numel() for p in kan_replica.parameters() if p.requires_grad)
         }
         print(f"[Layer {layer_idx} | Device {device_str}] Done! Final Cosine Similarity: {final_cos_sim*100.0:.2f}%")
+        
+        # Remove the forward hook to prevent memory leaks and handle cleanup
+        hook_handle.remove()
         
         # Cleanup KAN variables
         del kan_replica, X_test, Y_test
