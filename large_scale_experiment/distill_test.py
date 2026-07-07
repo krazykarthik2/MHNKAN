@@ -126,6 +126,10 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
         if args_model == "gpt2":
             hf_model = GPT2Model.from_pretrained(model_name)
             mlp_block = hf_model.h[layer_idx].mlp
+            # Extract statistics from LayerNorm preceding the MLP block
+            ln_weight = hf_model.h[layer_idx].ln_2.weight.data.detach().clone().to(device)
+            ln_bias = hf_model.h[layer_idx].ln_2.bias.data.detach().clone().to(device)
+            
             def original_ffn(x):
                 with torch.no_grad():
                     y = mlp_block(x)
@@ -134,6 +138,10 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
             hf_model = AutoModel.from_pretrained(model_name)
             ffn_intermediate = hf_model.encoder.layer[layer_idx].intermediate
             ffn_output = hf_model.encoder.layer[layer_idx].output.dense
+            # Extract statistics from LayerNorm preceding intermediate block (attention layer norm output)
+            ln_weight = hf_model.encoder.layer[layer_idx].attention.output.LayerNorm.weight.data.detach().clone().to(device)
+            ln_bias = hf_model.encoder.layer[layer_idx].attention.output.LayerNorm.bias.data.detach().clone().to(device)
+            
             def original_ffn(x):
                 with torch.no_grad():
                     h = ffn_intermediate(x)
@@ -146,8 +154,14 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
         # Setup KAN replica (Increase components from 2 to 4 for higher representational capacity)
         kan_replica = EMLKANFFNReplica(d_model, num_components=4).to(device)
         
-        # Test baseline static set
-        X_test = torch.randn(2000, d_model).to(device)
+        # Helper to generate feature-matched zero-data inputs
+        def generate_matched_inputs(size):
+            # Normal distribution Z scaled by LayerNorm scale (weight) and shift (bias)
+            Z = torch.randn(size, d_model).to(device)
+            return Z * ln_weight + ln_bias
+            
+        # Test baseline static set aligned with analytical LayerNorm distributions
+        X_test = generate_matched_inputs(2000)
         Y_test = original_ffn(X_test)
         
         # Group parameters
@@ -180,8 +194,8 @@ def distill_queue_worker(worker_id, task_queue, model_name, args_model, d_model,
                 opt_muon.zero_grad()
                 opt_adam.zero_grad()
                 
-                # Infinite dynamic calibration data generation
-                batch_x = torch.randn(batch_size, d_model).to(device)
+                # Infinite dynamic calibration data generation matching preceding LayerNorm scale
+                batch_x = generate_matched_inputs(batch_size)
                 batch_y = original_ffn(batch_x)
                 
                 outputs = kan_replica(batch_x)
