@@ -451,9 +451,15 @@ def main():
                 _ = dag_ffn(x_bench)
                 
         # Benchmark 1: Standard KAN Loop
+        print("Profiling Standard KAN Block...")
         t0 = time.time()
         with torch.no_grad():
-            for _ in range(num_runs):
+            try:
+                from tqdm import tqdm
+                run_iter = tqdm(range(num_runs), desc="Standard KAN")
+            except ImportError:
+                run_iter = range(num_runs)
+            for _ in run_iter:
                 _ = model.blocks[0].ffn1(x_bench)
         if device.type == "cuda":
             torch.cuda.synchronize()
@@ -461,9 +467,15 @@ def main():
         standard_throughput = total_tokens / standard_time
         
         # Benchmark 2: Compiled PyTorch DAG (Symbolic equations skipping pruned indices)
+        print("Profiling Compiled PyTorch DAG...")
         t0 = time.time()
         with torch.no_grad():
-            for _ in range(num_runs):
+            try:
+                from tqdm import tqdm
+                run_iter = tqdm(range(num_runs), desc="Compiled DAG")
+            except ImportError:
+                run_iter = range(num_runs)
+            for _ in run_iter:
                 _ = dag_ffn(x_bench)
         if device.type == "cuda":
             torch.cuda.synchronize()
