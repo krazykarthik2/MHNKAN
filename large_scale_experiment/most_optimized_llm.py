@@ -365,32 +365,50 @@ def main():
     criterion = nn.CrossEntropyLoss()
     
     seq_len = 64
-    batch_size = 32
+    # If using the large 1.8B profile, scale down the micro-batch size and use gradient accumulation
+    is_large_model = (args.profile in ["llama-7b-kan", "llama-7b-equivalent-kan"])
+    micro_batch_size = 2 if is_large_model else 32
+    accumulation_steps = 16 if is_large_model else 1  # 2 * 16 = effective batch size of 32
+    
     steps = 150
     
-    print("\nTraining EML-KAN LLaMA LLM on Wikitext-2 BPE tokens...")
+    # Initialize PyTorch AMP Scaler for mixed-precision stability
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
+    
+    print(f"\nTraining EML-KAN LLaMA LLM on Wikitext-2 BPE tokens (AMP enabled: {device.type == 'cuda'})...")
+    print(f"Configured Micro-batch: {micro_batch_size} | Gradient Accumulation Steps: {accumulation_steps}")
     print("=" * 60)
     
     for step in range(steps):
-        x_batch = []
-        y_batch = []
-        for _ in range(batch_size):
-            start_idx = random.randint(0, len(data_tokens) - seq_len - 2)
-            x_batch.append(data_tokens[start_idx : start_idx + seq_len])
-            y_batch.append(data_tokens[start_idx + 1 : start_idx + seq_len + 1])
-            
-        x_tensor = torch.tensor(x_batch, dtype=torch.long).to(device)
-        y_tensor = torch.tensor(y_batch, dtype=torch.long).to(device)
-        
         optimizer.zero_grad()
-        logits = model(x_tensor)
+        step_loss = 0.0
         
-        loss = criterion(logits.view(-1, vocab_size), y_tensor.view(-1))
-        loss.backward()
-        optimizer.step()
+        # Gradient accumulation loop
+        for acc_step in range(accumulation_steps):
+            x_batch = []
+            y_batch = []
+            for _ in range(micro_batch_size):
+                start_idx = random.randint(0, len(data_tokens) - seq_len - 2)
+                x_batch.append(data_tokens[start_idx : start_idx + seq_len])
+                y_batch.append(data_tokens[start_idx + 1 : start_idx + seq_len + 1])
+                
+            x_tensor = torch.tensor(x_batch, dtype=torch.long).to(device)
+            y_tensor = torch.tensor(y_batch, dtype=torch.long).to(device)
+            
+            # Autocast enables FP16/BF16 tensor ops automatically, halving VRAM requirements
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                logits = model(x_tensor)
+                loss = criterion(logits.view(-1, vocab_size), y_tensor.view(-1))
+                loss = loss / accumulation_steps
+                
+            scaler.scale(loss).backward()
+            step_loss += loss.item() * accumulation_steps
+            
+        scaler.step(optimizer)
+        scaler.update()
         
         if (step + 1) % 30 == 0 or step == 0:
-            print(f"Step {step+1:03d}/{steps} | CrossEntropy Loss: {loss.item():.4f}")
+            print(f"Step {step+1:03d}/{steps} | CrossEntropy Loss: {step_loss:.4f}")
             
     print("=" * 60)
     print("Training finished.")
