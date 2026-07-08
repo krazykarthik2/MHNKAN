@@ -215,10 +215,7 @@ def generate_optimized_dag_pytorch(model, filepath="most_optimized_llm_dag.py"):
         f.write("    def forward(self, features):\n")
         f.write("        # features shape: [batch_size, seq_len, d_model]\n")
         f.write("        bs, seq_len, d_model = features.shape\n")
-        f.write("        flat_features = features.view(-1, d_model)\n")
-        
-        d_ffn = model.config['d_ffn']
-        f.write(f"        flat_out = torch.zeros(flat_features.shape[0], {d_ffn}, device=features.device)\n\n")
+        f.write("        flat_features = features.view(-1, d_model)\n\n")
         
         for b_idx, block in enumerate(model.blocks):
             fc = block.ffn1.linear.weight.data.cpu().numpy()
@@ -227,7 +224,9 @@ def generate_optimized_dag_pytorch(model, filepath="most_optimized_llm_dag.py"):
             out_features, in_features = fc.shape
             
             f.write(f"        # --- Block {b_idx} FFN1 Symbolic Mapping ---\n")
+            out_nodes = []
             for c in range(out_features):
+                out_nodes.append(f"out_{c}")
                 f.write(f"        # Node {c}\n")
                 f.write(f"        z_{c} = ")
                 
@@ -258,9 +257,11 @@ def generate_optimized_dag_pytorch(model, filepath="most_optimized_llm_dag.py"):
                     f.write(f"        val_{c}_{k} = z_{c} * {c_val:.6f} + {d:.6f}\n")
                     f.write(f"        arg_y_{c}_{k} = torch.where(val_{c}_{k} > 20.0, val_{c}_{k}, torch.where(val_{c}_{k} < -20.0, torch.zeros_like(val_{c}_{k}), torch.log(1.0 + torch.exp(val_{c}_{k})))) + 1e-6\n")
                     f.write(f"        out_{c} = out_{c} + {w_eml:.6f} * (torch.exp(arg_x_{c}_{k}) - torch.log(arg_y_{c}_{k}))\n")
-                    
-                f.write(f"        flat_out[:, {c}] = out_{c}\n\n")
+                f.write("\n")
                 
+            f.write("        # Stack all computed nodes to build FFN output vector\n")
+            f.write(f"        flat_out = torch.stack([{', '.join(out_nodes)}], dim=-1)\n\n")
+            
         f.write("        return flat_out.view(bs, seq_len, -1)\n")
         
     print("PyTorch DAG script compiled successfully.")
