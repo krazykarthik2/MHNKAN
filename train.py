@@ -348,17 +348,18 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Active Device: {device}")
     
-    print("\nLoading state-of-the-art LLaMA-3 BPE Tokenizer...")
+    print("\nLoading state-of-the-art Qwen-2.5 BPE Tokenizer...")
     from transformers import AutoTokenizer
     try:
-        tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
+        tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B")
     except Exception:
-        tokenizer = AutoTokenizer.from_pretrained("Xenova/llama3-tokenizer-vocab")
+        # Open source non-gated fallback configuration
+        tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Coder-1.5B")
         
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     vocab_size = len(tokenizer)
-    print(f"LLaMA-3 BPE Vocabulary Size: {vocab_size}")
+    print(f"Qwen-2.5 BPE Vocabulary Size: {vocab_size}")
     
     config = CONFIGS[args.profile]
     print(f"\nBuilding EML-KAN LLaMA model under {args.profile.upper()} profile...")
