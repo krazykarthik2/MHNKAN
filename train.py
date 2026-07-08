@@ -368,19 +368,10 @@ def main():
         run_conversational_chat(model, tokenizer, device)
         return
         
-    print("\nLoading DailyDialog Dialogue Dataset from Hugging Face...")
-    try:
-        from datasets import load_dataset
-        raw_dataset = load_dataset("daily_dialog")
-        train_conversations = raw_dataset["train"]["dialog"]
-        val_conversations = raw_dataset["validation"]["dialog"]
-    except Exception as data_err:
-        print(f"Failed to load DailyDialog ({data_err}). Building mock conversational data stream...")
-        train_conversations = [
-            ["Hello, how are you?", "I am doing well, how can I assist you?", "Tell me a joke.", "Why did the neural net cross the road? To minimize loss!"],
-            ["What is your name?", "I am the EML-KAN LLaMA conversational assistant.", "That is a cool name.", "Thank you, I was optimized for language generation."]
-        ] * 100
-        val_conversations = train_conversations[:10]
+    from datasets import load_dataset
+    raw_dataset = load_dataset("daily_dialog")
+    train_conversations = raw_dataset["train"]["dialog"]
+    val_conversations = raw_dataset["validation"]["dialog"]
         
     train_dataset = ConversationalDataset(train_conversations, tokenizer, max_length=128)
     val_dataset = ConversationalDataset(val_conversations, tokenizer, max_length=128)
