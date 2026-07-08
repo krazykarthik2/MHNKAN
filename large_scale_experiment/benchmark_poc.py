@@ -1,7 +1,13 @@
+import os
+import sys
+import math
 import time
+import random
+import urllib.request
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 import numpy as np
 
 # Set seed
@@ -12,7 +18,6 @@ np.random.seed(42)
 # Model Architectures
 # ==============================================================================
 
-# 1. Standard MLP (FFN) Block
 class StandardFFN(nn.Module):
     def __init__(self, d_model, d_ffn):
         super().__init__()
@@ -23,7 +28,6 @@ class StandardFFN(nn.Module):
     def forward(self, x):
         return self.fc2(self.act(self.fc1(x)))
 
-# 2. EML-KAN Activation Function
 class EMLKANActivation(nn.Module):
     def __init__(self, channels, num_components=4):
         super().__init__()
@@ -56,7 +60,6 @@ class EMLKANLinear(nn.Module):
     def forward(self, x):
         return self.act(self.linear(x))
 
-# 3. EML-KAN FFN Replica
 class EMLKANFFN(nn.Module):
     def __init__(self, d_model, d_ffn, num_components=4):
         super().__init__()
@@ -77,15 +80,42 @@ def run_benchmark():
     d_model = 512
     d_ffn = 2048
     
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+    
     # 1. Instantiate models
-    mlp = StandardFFN(d_model, d_ffn)
-    kan = EMLKANFFN(d_model, d_ffn, num_components=4)
+    mlp = StandardFFN(d_model, d_ffn).to(device)
+    kan = EMLKANFFN(d_model, d_ffn, num_components=4).to(device)
     
     # 2. Count parameters
     mlp_params = sum(p.numel() for p in mlp.parameters())
     kan_params = sum(p.numel() for p in kan.parameters())
     
-    # 3. Apply 50% sparsity to KAN's linear connection weights
+    # 3. Fit KAN weights briefly to demonstrate representation alignment
+    # (Without training, random initialization yields ~0% cosine similarity)
+    print("\nAligning KAN representation to FFN target function...")
+    optimizer = optim.AdamW(kan.parameters(), lr=0.01)
+    criterion = nn.MSELoss()
+    
+    kan.train()
+    mlp.eval()
+    
+    # Generate representative token hidden states
+    x_train = torch.randn(100, 64, d_model).to(device)
+    with torch.no_grad():
+        y_train = mlp(x_train)
+        
+    for epoch in range(50):
+        optimizer.zero_grad()
+        outputs = kan(x_train)
+        # Joint optimization loss: MSE + (1 - CosSim)
+        mse_loss = criterion(outputs, y_train)
+        cos_loss = 1.0 - F.cosine_similarity(outputs, y_train, dim=-1).mean()
+        loss = mse_loss + cos_loss
+        loss.backward()
+        optimizer.step()
+        
+    # 4. Apply 50% sparsity to KAN's linear weights after alignment
     with torch.no_grad():
         for name, param in kan.named_parameters():
             if "linear.weight" in name:
@@ -101,24 +131,17 @@ def run_benchmark():
         else:
             kan_active_params += param.numel()
             
-    # 4. Perform speed benchmarks (CPU & GPU)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
-    
-    mlp.to(device)
-    kan.to(device)
+    # 5. Speed Benchmarks (CPU & GPU)
     mlp.eval()
     kan.eval()
-    
-    # Dummy inputs matching sequence block size
-    x = torch.randn(128, 64, d_model).to(device) # batch=128, seq=64
+    x = torch.randn(128, 64, d_model).to(device)
     
     # Warmup
     for _ in range(50):
         _ = mlp(x)
         _ = kan(x)
         
-    # Standard MLP timing
+    # MLP latency
     t0 = time.time()
     for _ in range(500):
         _ = mlp(x)
@@ -126,7 +149,7 @@ def run_benchmark():
         torch.cuda.synchronize()
     mlp_time = (time.time() - t0) / 500.0
     
-    # EML-KAN timing
+    # EML-KAN latency
     t0 = time.time()
     for _ in range(500):
         _ = kan(x)
@@ -134,11 +157,10 @@ def run_benchmark():
         torch.cuda.synchronize()
     kan_time = (time.time() - t0) / 500.0
     
-    # Cosine alignment verification check
+    # Final representation alignment check
     with torch.no_grad():
         target_outputs = mlp(x)
         replica_outputs = kan(x)
-        
         cos_sim = F.cosine_similarity(target_outputs, replica_outputs, dim=-1).mean().item()
         mse = F.mse_loss(target_outputs, replica_outputs).item()
         

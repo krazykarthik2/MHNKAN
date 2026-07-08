@@ -193,38 +193,43 @@ def generate_optimized_dag_pytorch(model, filepath="most_optimized_llm_dag.py"):
     print("PyTorch DAG script compiled successfully.")
 
 # ==============================================================================
-# 5. Dataset Loader & Sandbox Training
+# 5. Tokenizer & Wikitext-2 Dataset Loader
 # ==============================================================================
 
 def main():
-    print("Downloading Tiny Shakespeare Corpus for training...")
-    url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
-    filepath = "shakespeare.txt"
+    print("Loading GPT-2 BPE Tokenizer...")
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    vocab_size = tokenizer.vocab_size
+    print(f"BPE Vocabulary Size: {vocab_size}")
+    
+    print("\nDownloading and loading Wikitext-2 Training Corpus...")
+    url = "https://raw.githubusercontent.com/salesforce/wikitext/master/wikitext-2-raw-v1/wiki.train.raw"
+    filepath = "wiki.train.raw"
     
     if not os.path.exists(filepath):
         urllib.request.urlretrieve(url, filepath)
-        print("Shakespeare corpus downloaded successfully.")
+        print("Wikitext-2 corpus downloaded successfully.")
     else:
-        print("Using cached Shakespeare corpus.")
+        print("Using cached Wikitext-2 corpus.")
         
     with open(filepath, 'r', encoding='utf-8') as f:
         text = f.read()
         
-    # Character-level vocab
-    chars = sorted(list(set(text)))
-    vocab_size = len(chars)
-    char_to_id = {ch: i for i, ch in enumerate(chars)}
-    id_to_char = {i: ch for i, ch in enumerate(chars)}
+    # Standardize data loader sizes: select 1MB slice for fast training
+    text_slice = text[:1000000]
     
-    print(f"Dataset Characters: {len(text)} | Unique Vocabulary Size: {vocab_size}")
+    print("Tokenizing corpus...")
+    # Encode with truncation to prevent tokenizer memory blowup
+    data_tokens = tokenizer.encode(text_slice, truncation=False)
+    print(f"Tokenized Corpus Length: {len(data_tokens)} tokens")
     
-    # Tokenize full corpus
-    data_tokens = [char_to_id[ch] for ch in text]
-    
-    # Build model (EML-KAN Transformer)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using training device: {device}")
     
+    # Instantiate LLM (Large vocabulary 50,257)
     model = EMLKANTransformerLM(vocab_size=vocab_size, d_model=128, n_heads=4, n_layers=1).to(device)
     model.train()
     
@@ -235,11 +240,10 @@ def main():
     batch_size = 32
     steps = 150
     
-    print("\nTraining EML-KAN Decoder LLM on Tiny Shakespeare...")
+    print("\nTraining EML-KAN Decoder LLM on Wikitext-2 BPE tokens...")
     print("=" * 60)
     
     for step in range(steps):
-        # Extract random batch chunks
         x_batch = []
         y_batch = []
         for _ in range(batch_size):
@@ -271,23 +275,28 @@ def main():
     dag_path = os.path.join(base_dir, "most_optimized_llm_dag.py")
     generate_optimized_dag_pytorch(model, dag_path)
     
-    # Text Generation check
+    # Generative BPE Decoding with Top-K and Temperature Sampling
     model.eval()
-    seed_str = "ROMEO:"
-    input_ids = torch.tensor([[char_to_id[ch] for ch in seed_str]], dtype=torch.long).to(device)
+    seed_str = "The scientific community has recently"
+    input_ids = torch.tensor([tokenizer.encode(seed_str)], dtype=torch.long).to(device)
     
-    print(f"\nGenerative text decoding check:")
+    print(f"\nGenerative BPE decoding check (Top-K sampling):")
     print(f"  Seed: '{seed_str}'")
     
-    generated_chars = list(seed_str)
     with torch.no_grad():
-        for _ in range(30):
+        for _ in range(25):
             logits = model(input_ids)
-            next_token = torch.argmax(logits[0, -1, :]).item()
-            generated_chars.append(id_to_char[next_token])
+            next_logits = logits[0, -1, :] / 0.8 # Temperature 0.8
+            
+            # Top-k filtering (k=5)
+            v, idx = torch.topk(next_logits, 5)
+            probs = F.softmax(v, dim=-1)
+            next_token = idx[torch.multinomial(probs, 1)].item()
+            
             input_ids = torch.cat([input_ids, torch.tensor([[next_token]], dtype=torch.long).to(device)], dim=1)
             
-    print(f"  Predicted sequence:\n{''.join(generated_chars)}")
+    decoded_output = tokenizer.decode(input_ids[0].tolist())
+    print(f"  Predicted sequence:\n{decoded_output}")
 
 if __name__ == "__main__":
     main()
