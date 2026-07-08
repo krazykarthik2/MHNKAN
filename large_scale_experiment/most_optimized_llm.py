@@ -124,7 +124,8 @@ class EMLKANGQAAttention(nn.Module):
             
         scores = (q @ k.transpose(-2, -1)) / math.sqrt(self.d_head)
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
+            # Use -65500.0 instead of -1e9 to fit within FP16/Half-precision range limits
+            scores = scores.masked_fill(mask == 0, -65500.0)
             
         attn = F.softmax(scores, dim=-1)
         context = (attn @ v).transpose(1, 2).contiguous().view(bs, seq_len, d_model)
