@@ -312,13 +312,19 @@ def main():
     
     config = CONFIGS[args.profile]
     
-    print("Loading GPT-2 BPE Tokenizer...")
+    print("Loading state-of-the-art LLaMA-3 BPE Tokenizer...")
     from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    # Load LLaMA-3 tokenizer using a public configuration fallbacks if token permissions are locked
+    try:
+        tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
+    except Exception:
+        # Fallback to the open-source LLaMA-3 tokenizer checkpoint representation
+        tokenizer = AutoTokenizer.from_pretrained("Xenova/llama3-tokenizer-vocab")
+        
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    vocab_size = tokenizer.vocab_size
-    print(f"BPE Vocabulary Size: {vocab_size}")
+    vocab_size = len(tokenizer)
+    print(f"LLaMA-3 BPE Vocabulary Size: {vocab_size}")
     
     print("\nLoading Wikitext-2 Training Corpus...")
     text = ""
