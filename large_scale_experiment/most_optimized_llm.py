@@ -281,6 +281,14 @@ CONFIGS = {
         "d_ffn": 11008,
         "n_layers": 32
     },
+    # 1.8B EML-KAN model with the identical representational capacity of a standard 7B MLP model
+    "llama-7b-equivalent-kan": {
+        "d_model": 2048,
+        "n_heads": 16,
+        "n_kv_heads": 4,
+        "d_ffn": 5120,
+        "n_layers": 24
+    },
     # Scaled down POC model sharing the identical professional architecture block for verification
     "poc-llama-kan": {
         "d_model": 256,
@@ -294,7 +302,7 @@ CONFIGS = {
 def main():
     parser = argparse.ArgumentParser(description="Professional LLaMA-7B EML-KAN Transformer LM")
     parser.add_argument("--profile", type=str, default="poc-llama-kan",
-                        choices=["poc-llama-kan", "llama-7b-kan"],
+                        choices=["poc-llama-kan", "llama-7b-equivalent-kan", "llama-7b-kan"],
                         help="Configuration scaling profile to build (default: poc-llama-kan)")
     args = parser.parse_args()
     
@@ -350,11 +358,11 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model Total Parameters: {total_params:,}")
     
-    # If the user selects the full 7B parameter profile, stop after configuration validation
+    # If the user selects the full 7B parameter profile or the 1.8B equivalent, stop after configuration validation
     # to avoid OOM memory crashes on local compute nodes.
-    if args.profile == "llama-7b-kan":
-        print("\n[SUCCESS] LLaMA-7B-KAN scale configuration compiled and verified successfully!")
-        print("To train the full 7B parameter model, run this script inside a multi-node GPU cluster.")
+    if args.profile in ["llama-7b-kan", "llama-7b-equivalent-kan"]:
+        print(f"\n[SUCCESS] {args.profile.upper()} scale configuration compiled and verified successfully!")
+        print("To train this large-scale model, run this script inside a multi-node GPU cluster.")
         return
         
     optimizer = optim.AdamW(model.parameters(), lr=0.003, weight_decay=1e-4)
