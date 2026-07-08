@@ -220,13 +220,6 @@ CONFIGS = {
         "n_kv_heads": 4,
         "d_ffn": 5120,
         "n_layers": 24
-    },
-    "poc-llama-kan": {
-        "d_model": 256,
-        "n_heads": 8,
-        "n_kv_heads": 2,
-        "d_ffn": 512,
-        "n_layers": 4
     }
 }
 
@@ -334,9 +327,9 @@ def run_conversational_chat(model, tokenizer, device, max_gen_len=64):
 
 def main():
     parser = argparse.ArgumentParser(description="Professional KAN-LLaMA Dialogue Assistant")
-    parser.add_argument("--profile", type=str, default="poc-llama-kan",
-                        choices=["poc-llama-kan", "llama-7b-equivalent-kan"],
-                        help="Configuration scaling profile (default: poc-llama-kan)")
+    parser.add_argument("--profile", type=str, default="llama-7b-equivalent-kan",
+                        choices=["llama-7b-equivalent-kan"],
+                        help="Configuration scaling profile (default: llama-7b-equivalent-kan)")
     parser.add_argument("--chat", action="store_true",
                         help="Enter interactive conversation mode using saved checkpoints")
     parser.add_argument("--epochs", type=int, default=10,
