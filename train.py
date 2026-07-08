@@ -368,34 +368,25 @@ def main():
         run_conversational_chat(model, tokenizer, device)
         return
         
-    import urllib.request
-    import os
+    print("\nLoading OpenAssistant Guanaco Dialogue Dataset from Hugging Face...")
+    from datasets import load_dataset
+    # This dataset uses pre-compiled Parquet files directly, avoiding HF script execution issues
+    raw_dataset = load_dataset("timdettmers/openassistant-guanaco")
     
-    print("\nDownloading and parsing DailyDialog text corpus directly from raw source...")
-    train_url = "https://raw.githubusercontent.com/Dataset-Collection/daily_dialog/master/dialogs/train.txt"
-    val_url = "https://raw.githubusercontent.com/Dataset-Collection/daily_dialog/master/dialogs/validation.txt"
-    
-    train_path = "dialogues_train.txt"
-    val_path = "dialogues_validation.txt"
-    
-    if not os.path.exists(train_path):
-        urllib.request.urlretrieve(train_url, train_path)
-    if not os.path.exists(val_path):
-        urllib.request.urlretrieve(val_url, val_path)
+    # Parse conversations formatted as '### Human: ... ### Assistant: ...'
+    def parse_guanaco_dialogue(text):
+        turns = []
+        parts = text.split("### ")
+        for part in parts:
+            part = part.strip()
+            if part.startswith("Human:"):
+                turns.append(part[len("Human:"):].strip())
+            elif part.startswith("Assistant:"):
+                turns.append(part[len("Assistant:"):].strip())
+        return turns
         
-    train_conversations = []
-    with open(train_path, "r", encoding="utf-8") as f:
-        for line in f:
-            turns = [t.strip() for t in line.split("__eou__") if t.strip()]
-            if turns:
-                train_conversations.append(turns)
-                
-    val_conversations = []
-    with open(val_path, "r", encoding="utf-8") as f:
-        for line in f:
-            turns = [t.strip() for t in line.split("__eou__") if t.strip()]
-            if turns:
-                val_conversations.append(turns)
+    train_conversations = [parse_guanaco_dialogue(text) for text in raw_dataset["train"]["text"]]
+    val_conversations = [parse_guanaco_dialogue(text) for text in raw_dataset["test"]["text"]]
         
     train_dataset = ConversationalDataset(train_conversations, tokenizer, max_length=128)
     val_dataset = ConversationalDataset(val_conversations, tokenizer, max_length=128)
