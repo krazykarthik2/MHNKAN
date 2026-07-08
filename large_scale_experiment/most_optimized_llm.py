@@ -206,63 +206,64 @@ def apply_sparsity_to_model(model, sparsity=0.5):
 def generate_optimized_dag_pytorch(model, filepath="most_optimized_llm_dag.py"):
     print(f"\nCompiling trained parameters into optimized PyTorch DAG equations inside {filepath}...")
     
+    # Extract weights from first block's FFN1 to write them directly into the constructor
+    block = model.blocks[0]
+    weight = block.ffn1.linear.weight.data.cpu().numpy()
+    act = block.ffn1.act
+    
     with open(filepath, "w") as f:
         f.write("import torch\n")
-        f.write("import torch.nn as nn\n\n")
+        f.write("import torch.nn as nn\n")
+        f.write("import torch.nn.functional as F\n\n")
         f.write("class OptimizedEMLKANFFN1(nn.Module):\n")
         f.write("    def __init__(self):\n")
-        f.write("        super().__init__()\n\n")
-        f.write("    def forward(self, features):\n")
+        f.write("        super().__init__()\n")
+        
+        # Write sparse weights as nn.Parameter to preserve sparsity
+        f.write("        # Masked weight matrix with 50% sparsity\n")
+        f.write("        self.weight = nn.Parameter(torch.zeros(" + str(weight.shape[0]) + ", " + str(weight.shape[1]) + "))\n")
+        f.write("        with torch.no_grad():\n")
+        for i in range(weight.shape[0]):
+            for j in range(weight.shape[1]):
+                if abs(weight[i, j]) > 1e-4:
+                    f.write(f"            self.weight[{i}, {j}] = {weight[i, j]:.6f}\n")
+                    
+        # Write KAN activation parameters as parameters
+        f.write("\n        # EML-KAN activation parameters\n")
+        f.write("        self.a = nn.Parameter(torch.zeros(" + str(act.a.shape[0]) + ", " + str(act.a.shape[1]) + "))\n")
+        f.write("        self.b = nn.Parameter(torch.zeros(" + str(act.b.shape[0]) + ", " + str(act.b.shape[1]) + "))\n")
+        f.write("        self.c = nn.Parameter(torch.zeros(" + str(act.c.shape[0]) + ", " + str(act.c.shape[1]) + "))\n")
+        f.write("        self.d = nn.Parameter(torch.zeros(" + str(act.d.shape[0]) + ", " + str(act.d.shape[1]) + "))\n")
+        f.write("        self.weight_base = nn.Parameter(torch.zeros(" + str(act.weight_base.shape[0]) + "))\n")
+        f.write("        self.weight_eml = nn.Parameter(torch.zeros(" + str(act.weight_eml.shape[0]) + ", " + str(act.weight_eml.shape[1]) + "))\n")
+        
+        f.write("        with torch.no_grad():\n")
+        for i in range(act.a.shape[0]):
+            f.write(f"            self.weight_base[{i}] = {act.weight_base[i].item():.6f}\n")
+            for k in range(act.a.shape[1]):
+                f.write(f"            self.a[{i}, {k}] = {act.a[i, k].item():.6f}\n")
+                f.write(f"            self.b[{i}, {k}] = {act.b[i, k].item():.6f}\n")
+                f.write(f"            self.c[{i}, {k}] = {act.c[i, k].item():.6f}\n")
+                f.write(f"            self.d[{i}, {k}] = {act.d[i, k].item():.6f}\n")
+                f.write(f"            self.weight_eml[{i}, {k}] = {act.weight_eml[i, k].item():.6f}\n")
+                
+        f.write("\n    def forward(self, features):\n")
         f.write("        # features shape: [batch_size, seq_len, d_model]\n")
         f.write("        bs, seq_len, d_model = features.shape\n")
         f.write("        flat_features = features.view(-1, d_model)\n\n")
         
-        for b_idx, block in enumerate(model.blocks):
-            fc = block.ffn1.linear.weight.data.cpu().numpy()
-            act = block.ffn1.act
-            
-            out_features, in_features = fc.shape
-            
-            f.write(f"        # --- Block {b_idx} FFN1 Symbolic Mapping ---\n")
-            out_nodes = []
-            for c in range(out_features):
-                out_nodes.append(f"out_{c}")
-                f.write(f"        # Node {c}\n")
-                f.write(f"        z_{c} = ")
-                
-                active_indices = np.where(np.abs(fc[c]) > 1e-4)[0]
-                if len(active_indices) == 0:
-                    f.write("torch.zeros(flat_features.shape[0], device=features.device)\n")
-                else:
-                    terms = []
-                    for idx in active_indices:
-                        terms.append(f"flat_features[:, {idx}] * {fc[c, idx]:.6f}")
-                    f.write(" + ".join(terms) + "\n")
-                    
-                w_base = act.weight_base[c].item()
-                f.write(f"        out_{c} = z_{c} * {w_base:.6f}\n")
-                
-                for k in range(4):
-                    a = act.a[c, k].item()
-                    b = act.b[c, k].item()
-                    c_val = act.c[c, k].item()
-                    d = act.d[c, k].item()
-                    w_eml = act.weight_eml[c, k].item()
-                    
-                    if abs(w_eml) < 1e-4:
-                        continue
-                        
-                    f.write(f"        # Basis {k}\n")
-                    f.write(f"        arg_x_{c}_{k} = torch.clamp(z_{c} * {a:.6f} + {b:.6f}, min=-10.0, max=10.0)\n")
-                    f.write(f"        val_{c}_{k} = z_{c} * {c_val:.6f} + {d:.6f}\n")
-                    f.write(f"        arg_y_{c}_{k} = torch.where(val_{c}_{k} > 20.0, val_{c}_{k}, torch.where(val_{c}_{k} < -20.0, torch.zeros_like(val_{c}_{k}), torch.log(1.0 + torch.exp(val_{c}_{k})))) + 1e-6\n")
-                    f.write(f"        out_{c} = out_{c} + {w_eml:.6f} * (torch.exp(arg_x_{c}_{k}) - torch.log(arg_y_{c}_{k}))\n")
-                f.write("\n")
-                
-            f.write("        # Stack all computed nodes to build FFN output vector\n")
-            f.write(f"        flat_out = torch.stack([{', '.join(out_nodes)}], dim=-1)\n\n")
-            
-        f.write("        return flat_out.view(bs, seq_len, -1)\n")
+        f.write("        # Vectorized linear projection utilizing masked weights\n")
+        f.write("        z = F.linear(flat_features, self.weight)\n\n")
+        
+        f.write("        # Vectorized EML-KAN activation mapping\n")
+        f.write("        out = self.weight_base * z\n")
+        f.write("        for k in range(4):\n")
+        f.write("            arg_x = torch.clamp(self.a[:, k] * z + self.b[:, k], min=-10.0, max=10.0)\n")
+        f.write("            val = self.c[:, k] * z + self.d[:, k]\n")
+        f.write("            arg_y = torch.where(val > 20.0, val, torch.where(val < -20.0, torch.zeros_like(val), torch.log(1.0 + torch.exp(val)))) + 1e-6\n")
+        f.write("            out = out + self.weight_eml[:, k] * (torch.exp(arg_x) - torch.log(arg_y))\n\n")
+        
+        f.write("        return out.view(bs, seq_len, -1)\n")
         
     print("PyTorch DAG script compiled successfully.")
 
