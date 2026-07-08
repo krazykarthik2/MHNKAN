@@ -452,6 +452,11 @@ def main():
                 scheduler.step()
                 optimizer.zero_grad()
                 
+                # Print loss update every 50 optimizer steps
+                opt_step = (step_idx + 1) // accumulation_steps
+                if opt_step % 50 == 0 or opt_step == 1:
+                    print(f"  Step {opt_step:03d}/{len(train_loader)//accumulation_steps:03d} | Current Batch Loss: {loss.item() * accumulation_steps:.4f}")
+                
             step_idx += 1
             
         avg_train_loss = epoch_loss / len(train_loader)
