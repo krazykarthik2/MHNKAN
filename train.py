@@ -153,8 +153,17 @@ class EMLKANLLaMA(nn.Module):
         bs, seq_len = input_ids.shape
         x = self.token_emb(input_ids)
         mask = torch.tril(torch.ones(seq_len, seq_len, device=input_ids.device)).view(1, 1, seq_len, seq_len)
+        
+        # Determine whether to use activation checkpointing to save VRAM
+        use_checkpointing = self.training
+        
+        from torch.utils.checkpoint import checkpoint
         for block in self.blocks:
-            x = block(x, mask=mask)
+            if use_checkpointing:
+                # Wrap forward block execution in PyTorch checkpointing to discard activation VRAM
+                x = checkpoint(block, x, mask, use_reentrant=False)
+            else:
+                x = block(x, mask=mask)
         x = self.ln_f(x)
         logits = self.head(x)
         return logits
@@ -388,12 +397,14 @@ def main():
     train_conversations = [parse_guanaco_dialogue(text) for text in raw_dataset["train"]["text"]]
     val_conversations = [parse_guanaco_dialogue(text) for text in raw_dataset["test"]["text"]]
         
-    train_dataset = ConversationalDataset(train_conversations, tokenizer, max_length=128)
-    val_dataset = ConversationalDataset(val_conversations, tokenizer, max_length=128)
+    # Keep context lengths and batch sizes strictly bounded to stay within 48GB VRAM limits
+    max_context_len = 96
+    train_dataset = ConversationalDataset(train_conversations, tokenizer, max_length=max_context_len)
+    val_dataset = ConversationalDataset(val_conversations, tokenizer, max_length=max_context_len)
     
     is_large = (args.profile == "llama-7b-equivalent-kan")
-    batch_size = 2 if is_large else 16
-    accumulation_steps = 16 if is_large else 1
+    batch_size = 1 if is_large else 16
+    accumulation_steps = 32 if is_large else 1  # 1 * 32 = effective batch size of 32
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
