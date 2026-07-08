@@ -369,7 +369,7 @@ def main():
         return
         
     from datasets import load_dataset
-    raw_dataset = load_dataset("daily_dialog")
+    raw_dataset = load_dataset("daily_dialog", trust_remote_code=True)
     train_conversations = raw_dataset["train"]["dialog"]
     val_conversations = raw_dataset["validation"]["dialog"]
         
