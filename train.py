@@ -368,11 +368,34 @@ def main():
         run_conversational_chat(model, tokenizer, device)
         return
         
-    from datasets import load_dataset
-    # Use the script-free Parquet mirror to bypass python script loading blockages entirely
-    raw_dataset = load_dataset("roskoN/dailydialog")
-    train_conversations = raw_dataset["train"]["dialog"]
-    val_conversations = raw_dataset["validation"]["dialog"]
+    import urllib.request
+    import os
+    
+    print("\nDownloading and parsing DailyDialog text corpus directly from raw source...")
+    train_url = "https://raw.githubusercontent.com/Dataset-Collection/daily_dialog/master/dialogs/train.txt"
+    val_url = "https://raw.githubusercontent.com/Dataset-Collection/daily_dialog/master/dialogs/validation.txt"
+    
+    train_path = "dialogues_train.txt"
+    val_path = "dialogues_validation.txt"
+    
+    if not os.path.exists(train_path):
+        urllib.request.urlretrieve(train_url, train_path)
+    if not os.path.exists(val_path):
+        urllib.request.urlretrieve(val_url, val_path)
+        
+    train_conversations = []
+    with open(train_path, "r", encoding="utf-8") as f:
+        for line in f:
+            turns = [t.strip() for t in line.split("__eou__") if t.strip()]
+            if turns:
+                train_conversations.append(turns)
+                
+    val_conversations = []
+    with open(val_path, "r", encoding="utf-8") as f:
+        for line in f:
+            turns = [t.strip() for t in line.split("__eou__") if t.strip()]
+            if turns:
+                val_conversations.append(turns)
         
     train_dataset = ConversationalDataset(train_conversations, tokenizer, max_length=128)
     val_dataset = ConversationalDataset(val_conversations, tokenizer, max_length=128)
