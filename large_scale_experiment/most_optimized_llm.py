@@ -511,7 +511,7 @@ def main():
         print(f"Standard KAN FFN Throughput:      {standard_throughput:.2f} tokens/sec")
         print(f"Compiled PyTorch DAG Latency:      {dag_time * 1000.0:.4f} ms")
         print(f"Compiled PyTorch DAG Throughput:   {dag_throughput:.2f} tokens/sec")
-        print(f"Speedup Ratio:                    {standard_throughput / dag_throughput:.2f}x (Hardware overhead-reduced)")
+        print(f"Speedup Ratio:                    {dag_throughput / standard_throughput:.2f}x (Hardware overhead-reduced)")
         print(f"Effective FLOP Improvement:       ~2.0x (due to 50% connection pruning)")
         print("=" * 60)
 
