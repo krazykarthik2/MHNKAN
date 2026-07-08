@@ -506,13 +506,38 @@ def main():
         dag_time = (time.time() - t0) / num_runs
         dag_throughput = total_tokens / dag_time
         
+        # Benchmark 3: Sequential Writing Speed (Single user stream: batch=1, seq=1)
+        print("Profiling Sequential Token Generation Speed (batch=1, seq=1)...")
+        x_seq = torch.randn(1, 1, config['d_model']).to(device)
+        
+        # Warmup
+        with torch.no_grad():
+            for _ in range(5):
+                _ = dag_ffn(x_seq)
+                
+        t0 = time.time()
+        with torch.no_grad():
+            try:
+                from tqdm import tqdm
+                run_iter = tqdm(range(num_runs), desc="Sequential Stream")
+            except ImportError:
+                run_iter = range(num_runs)
+            for _ in run_iter:
+                _ = dag_ffn(x_seq)
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        seq_time = (time.time() - t0) / num_runs
+        seq_throughput = 1.0 / seq_time
+        
         print("-" * 60)
-        print(f"Standard KAN FFN Block Latency:   {standard_time * 1000.0:.4f} ms")
-        print(f"Standard KAN FFN Throughput:      {standard_throughput:.2f} tokens/sec")
-        print(f"Compiled PyTorch DAG Latency:      {dag_time * 1000.0:.4f} ms")
-        print(f"Compiled PyTorch DAG Throughput:   {dag_throughput:.2f} tokens/sec")
-        print(f"Speedup Ratio:                    {dag_throughput / standard_throughput:.2f}x (Hardware overhead-reduced)")
-        print(f"Effective FLOP Improvement:       ~2.0x (due to 50% connection pruning)")
+        print(f"Standard KAN FFN Block Latency:      {standard_time * 1000.0:.4f} ms")
+        print(f"Standard KAN FFN Batch Throughput:   {standard_throughput:.2f} tokens/sec")
+        print(f"Compiled PyTorch DAG Latency:         {dag_time * 1000.0:.4f} ms")
+        print(f"Compiled PyTorch DAG Batch Throughput: {dag_throughput:.2f} tokens/sec")
+        print(f"Speedup Ratio:                       {dag_throughput / standard_throughput:.2f}x (Hardware overhead-reduced)")
+        print(f"Effective FLOP Improvement:          ~2.0x (due to 50% connection pruning)")
+        print(f"Sequential Generation Latency (B=1): {seq_time * 1000.0:.4f} ms")
+        print(f"Sequential Generation Throughput:     {seq_throughput:.2f} tokens/sec (single user stream)")
         print("=" * 60)
 
 if __name__ == "__main__":
