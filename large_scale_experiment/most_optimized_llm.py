@@ -358,12 +358,8 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model Total Parameters: {total_params:,}")
     
-    # If the user selects the full 7B parameter profile or the 1.8B equivalent, stop after configuration validation
-    # to avoid OOM memory crashes on local compute nodes.
-    if args.profile in ["llama-7b-kan", "llama-7b-equivalent-kan"]:
-        print(f"\n[SUCCESS] {args.profile.upper()} scale configuration compiled and verified successfully!")
-        print("To train this large-scale model, run this script inside a multi-node GPU cluster.")
-        return
+    # Note: Training 1.8B+ models from scratch requires substantial VRAM.
+    # We proceed with training directly as requested.
         
     optimizer = optim.AdamW(model.parameters(), lr=0.003, weight_decay=1e-4)
     criterion = nn.CrossEntropyLoss()
