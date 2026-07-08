@@ -440,30 +440,33 @@ def main():
         x_bench = torch.randn(32, 64, config['d_model']).to(device)
         total_tokens = 32 * 64
         
+        # Adjust profiling loop iterations based on device to prevent CPU hangs
+        num_runs = 5 if device.type == "cpu" else 100
+        
         # Warmup passes
         with torch.no_grad():
-            for _ in range(30):
+            for _ in range(5):
                 _ = model.blocks[0].ffn1(x_bench)
                 _ = dag_ffn(x_bench)
                 
         # Benchmark 1: Standard KAN Loop
         t0 = time.time()
         with torch.no_grad():
-            for _ in range(100):
+            for _ in range(num_runs):
                 _ = model.blocks[0].ffn1(x_bench)
         if device.type == "cuda":
             torch.cuda.synchronize()
-        standard_time = (time.time() - t0) / 100.0
+        standard_time = (time.time() - t0) / num_runs
         standard_throughput = total_tokens / standard_time
         
         # Benchmark 2: Compiled PyTorch DAG (Symbolic equations skipping pruned indices)
         t0 = time.time()
         with torch.no_grad():
-            for _ in range(100):
+            for _ in range(num_runs):
                 _ = dag_ffn(x_bench)
         if device.type == "cuda":
             torch.cuda.synchronize()
-        dag_time = (time.time() - t0) / 100.0
+        dag_time = (time.time() - t0) / num_runs
         dag_throughput = total_tokens / dag_time
         
         print("-" * 60)
