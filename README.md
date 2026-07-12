@@ -87,13 +87,13 @@ The project is structured experiment-wise to keep the code, generated visual pro
 
 ## 🧠 Model Architectures (`core/`)
 
-1. **`RBFKANLayer`** ([kan_hopfield.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/core/kan_hopfield.py)):
+1. **`RBFKANLayer`** ([kan_hopfield.py](core/kan_hopfield.py)):
    * Combined parallel SiLU residual path and trainable Radial Basis Function (RBF) grid mappings on the network edges.
-2. **`AnalyticalHopfieldKAN`** ([kan_hopfield.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/core/kan_hopfield.py)):
+2. **`AnalyticalHopfieldKAN`** ([kan_hopfield.py](core/kan_hopfield.py)):
    * A KAN mapping standard Modern Hopfield continuous attention querying onto logarithmic exp-sum-exp univariate activations, achieving exact memory retrieval (unrounded MSE = 0.0) at the $\beta \to \infty$ limit.
-3. **`SymbolicEdge` & Sparse fitting** ([symbolic_sparse_kan.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/core/symbolic_sparse_kan.py)):
+3. **`SymbolicEdge` & Sparse fitting** ([symbolic_sparse_kan.py](core/symbolic_sparse_kan.py)):
    * A workflow to prune KAN edges using L1 regularization, select active paths, fit symbolic formulas (linear, quadratic, exponential) via Scipy curve-fitting, and freeze them to eliminate learning overhead.
-4. **`SparseCrossAttentionKAN`** ([sparse_cross_attn_kan.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/core/sparse_cross_attn_kan.py)):
+4. **`SparseCrossAttentionKAN`** ([sparse_cross_attn_kan.py](core/sparse_cross_attn_kan.py)):
    * A hybrid combining the parameters of KAN edge expansions with the sequence length efficiency of cross-attention (`cross_attn_normal`), reducing active parameters and scaling linearly as $O(L \cdot M)$.
 
 ---
@@ -101,31 +101,31 @@ The project is structured experiment-wise to keep the code, generated visual pro
 ## 🔬 Key Experiments & Proofs
 
 ### 1. Genomic Understanding Evaluation (GUE) Proof
-* **Script:** [genomic_memory_proof.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/06_genomic_gue/genomic_memory_proof.py)
+* **Script:** [genomic_memory_proof.py](experiments/06_genomic_gue/genomic_memory_proof.py)
 * **Dataset:** HF `leannmlindsey/GUE` (`prom_core_all` train split)
 * **Reconstruction MSE:** `0.0000000000000000` (perfect unrounded float32 retrieval)
 * **Nucleotide Recovery Rate:** `100.00%` (1400/1400 bases recovered perfectly) under 25% random base mutations and 30% segment deletions.
-* **Details:** [GENOMIC_RECONSTRUCTION_PROOF.md](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/06_genomic_gue/GENOMIC_RECONSTRUCTION_PROOF.md)
+* **Details:** [GENOMIC_RECONSTRUCTION_PROOF.md](experiments/06_genomic_gue/GENOMIC_RECONSTRUCTION_PROOF.md)
 
 ### 2. Continuous Real-Valued Template Reconstruction
-* **Script:** [plot_continuous_real.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/05_continuous_real_valued/plot_continuous_real.py)
+* **Script:** [plot_continuous_real.py](experiments/05_continuous_real_valued/plot_continuous_real.py)
 * **Reconstruction MSE:** `0.0000000000000000` (Perfect unrounded retrieval on continuous Fashion MNIST classes) under $\sigma=0.6$ noise and 40% pixel erasure.
-* **Details:** [REAL_VALUED_PROOF.md](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/05_continuous_real_valued/REAL_VALUED_PROOF.md)
+* **Details:** [REAL_VALUED_PROOF.md](experiments/05_continuous_real_valued/REAL_VALUED_PROOF.md)
 
 ### 3. Memorization Sparsity Proof
-* **Script:** [memorize_proof_sparse.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/01_binary_memorization/memorize_proof_sparse.py)
+* **Script:** [memorize_proof_sparse.py](experiments/01_binary_memorization/memorize_proof_sparse.py)
 * **Parameter Savings:** **41.7% active parameter reduction** (9,141 vs 15,680) compared to standard MHN while maintaining exact recall.
-* **Details:** [MEMORIZATION_PROOF.md](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/01_binary_memorization/MEMORIZATION_PROOF.md)
+* **Details:** [MEMORIZATION_PROOF.md](experiments/01_binary_memorization/MEMORIZATION_PROOF.md)
 
 ### 4. Basin of Attraction Interpolation Phase Transition
-* **Script:** [basin_proof.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/03_basin_of_attraction/basin_proof.py)
+* **Script:** [basin_proof.py](experiments/03_basin_of_attraction/basin_proof.py)
 * **Behavior:** Proves that KAN-Hopfield stores stable, isolated attractor basins. Query interpolation between two targets exhibits an exact step-function phase transition at $\alpha = 0.5$.
-* **Details:** [BASIN_OF_ATTRACTION.md](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/03_basin_of_attraction/BASIN_OF_ATTRACTION.md)
+* **Details:** [BASIN_OF_ATTRACTION.md](experiments/03_basin_of_attraction/BASIN_OF_ATTRACTION.md)
 
 ### 5. Unified Mechanics Dashboard (Cross-Attention, Sparsity, Symbolic regression)
-* **Script:** [plot_network_mechanics.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/04_hybrid_sparse_cross_attn/plot_network_mechanics.py)
+* **Script:** [plot_network_mechanics.py](experiments/04_hybrid_sparse_cross_attn/plot_network_mechanics.py)
 * **Behavior:** Demonstrates routing metrics from GUE genomic sequences, L1 sparsity edge patterns, and symbolic regression curve fitting using real data.
-* **Details:** [UNIFIED_NETWORK_MECHANICS.md](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/experiments/04_hybrid_sparse_cross_attn/UNIFIED_NETWORK_MECHANICS.md)
+* **Details:** [UNIFIED_NETWORK_MECHANICS.md](experiments/04_hybrid_sparse_cross_attn/UNIFIED_NETWORK_MECHANICS.md)
 
 ---
 

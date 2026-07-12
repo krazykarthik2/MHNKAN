@@ -19,7 +19,7 @@ The diagrams below illustrate:
 
 ## 3. Verification Results
 
-We created a PyTorch implementation in [kan_hopfield.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/kan_hopfield.py) containing:
+We created a PyTorch implementation in [kan_hopfield.py](../core/kan_hopfield.py) containing:
 1. **`RBFKANLayer`**: A custom KAN layer that uses Radial Basis Functions (RBF) with trainable weights on the edges alongside a SiLU base residual path.
 2. **`AnalyticalHopfieldKAN`**: An analytical KAN structure mapping the Hopfield similarity attention query equation exactly onto univariate functions and linear edge updates.
 3. **`ModernHopfieldNetwork`**: A standard continuous MHN used as the ground-truth benchmark.
@@ -68,7 +68,7 @@ We extended this experiment to **Fashion MNIST** images ($d = 784$) representing
 * **Equivalence MSE (MHN vs. Analytical KAN):** `0.0000000000000000`
 * **Trained RBF-KAN Reconstruction MSE:** `0.00647474`
 
-The complete results, code details, and plots are documented in [FASHION_MNIST_RECONSTRUCTION.md](file:///C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/FASHION_MNIST_RECONSTRUCTION.md).
+The complete results, code details, and plots are documented in [FASHION_MNIST_RECONSTRUCTION.md](../experiments/02_fashion_mnist/FASHION_MNIST_RECONSTRUCTION.md).
 
 ---
 
@@ -77,7 +77,7 @@ We proved that a KAN can memorize Fashion MNIST patterns perfectly (with MSE = 0
 * **Active parameters (non-zero)**: 9,141 vs. MHN's 15,680 (**41.70% savings**).
 * **Binarized reconstruction MSE**: `0.0000000000` (Perfect retrieval).
 
-See the full proof details in [MEMORIZATION_PROOF.md](file:///C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/MEMORIZATION_PROOF.md).
+See the full proof details in [MEMORIZATION_PROOF.md](../experiments/01_binary_memorization/MEMORIZATION_PROOF.md).
 
 ---
 
@@ -86,7 +86,7 @@ We defined the KAN-Hopfield retrieval equations symbolically in SymPy and evalua
 * **Target weight $w_0$**: `1.0000000000000000000000000000000000000000000000000`
 * **Raw unrounded reconstruction MSE**: `0.00000000000000000000000000000000000000000000000000`
 
-See the high-precision validation in [SYMBOLIC_EXACT_SOLVE.md](file:///C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/SYMBOLIC_EXACT_SOLVE.md).
+See the high-precision validation in [SYMBOLIC_EXACT_SOLVE.md](../experiments/01_binary_memorization/SYMBOLIC_EXACT_SOLVE.md).
 
 ---
 
@@ -95,7 +95,7 @@ We evaluated the parameter counts, training iterations, and inference FLOPs acro
 * **Sparse KAN parameter savings**: **41.7% reduction** vs. MHN / `cross_attn_normal`.
 * **Sparse KAN inference FLOPs savings**: **70% reduction** vs. MHN / `cross_attn_normal`.
 
-See the complete metric table in [COMPARATIVE_METRICS.md](file:///C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/COMPARATIVE_METRICS.md).
+See the complete metric table in [COMPARATIVE_METRICS.md](COMPARATIVE_METRICS.md).
 
 ---
 
@@ -104,7 +104,7 @@ We verified that the Sparse KAN energy landscape maintains isolated basins of at
 * **Distance at $\alpha = 0.49$ to Pattern B**: `0.0000000000` (Perfect lock)
 * **Distance at $\alpha = 0.51$ to Pattern A**: `0.0000000000` (Perfect lock)
 
-See the full proof and visualization in [BASIN_OF_ATTRACTION.md](file:///C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/BASIN_OF_ATTRACTION.md).
+See the full proof and visualization in [BASIN_OF_ATTRACTION.md](../experiments/03_basin_of_attraction/BASIN_OF_ATTRACTION.md).
 
 ---
 
@@ -113,7 +113,7 @@ We combined the sparse/symbolic KAN edge-expansion concept with `cross_attn_norm
 * **RBF Sparsity achieved**: **100.00%** (100% of RBF overhead pruned).
 * **Binarized Retrieval MSE**: `0.0000000000` (Perfect inpainting and reconstruction).
 
-See the full hybrid model proof and comparison in [PROOF_and_ALL_comparison.md](file:///C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/PROOF_and_ALL_comparison.md).
+See the full hybrid model proof and comparison in [PROOF_and_ALL_comparison.md](../experiments/04_hybrid_sparse_cross_attn/PROOF_and_ALL_comparison.md).
 
 ---
 
@@ -122,7 +122,7 @@ We proved that KAN-Hopfield achieves exact MSE = 0.0 unrounded reconstruction er
 * **Standard MHN MSE**: `0.0000000000000000`
 * **Analytical KAN MSE**: `0.0000000000000000`
 
-See the continuous real-valued proof details in [REAL_VALUED_PROOF.md](file:///C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/REAL_VALUED_PROOF.md).
+See the continuous real-valued proof details in [REAL_VALUED_PROOF.md](../experiments/05_continuous_real_valued/REAL_VALUED_PROOF.md).
 ---
 
 ## 11. Genomic Understanding Evaluation (GUE) Proof
@@ -132,7 +132,7 @@ We extended our validation to real genomic sequences from the Hugging Face datas
 * **Retrieval MSE (unrounded):** `0.0000000000000000` for both standard MHN and Analytical KAN.
 * **Base Recovery Accuracy:** `100.00%` (1400/1400 nucleotides perfectly retrieved).
 
-See the full genomic proof details in [GENOMIC_RECONSTRUCTION_PROOF.md](file:///C:/Users/karthikkrazy/.gemini/antigravity/brain/b61fde41-981b-4214-ae72-96441b49d932/GENOMIC_RECONSTRUCTION_PROOF.md).
+See the full genomic proof details in [GENOMIC_RECONSTRUCTION_PROOF.md](../experiments/06_genomic_gue/GENOMIC_RECONSTRUCTION_PROOF.md).
 
 
 

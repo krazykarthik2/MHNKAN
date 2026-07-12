@@ -22,7 +22,7 @@ When $\mathbf{a}$ is exactly one-hot, the reconstructed output is the exact orig
 $$\mathbf{q}' = 1.0 \cdot \mathbf{x}_{\text{target}} + 0.0 \cdot \mathbf{x}_{\text{other}} = \mathbf{x}_{\text{target}}$$
 
 ### Empirical Run Log
-We executed the verification script in [plot_continuous_real.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/plot_continuous_real.py). The results on normalized continuous real-valued Fashion MNIST templates subjected to **extreme Gaussian noise ($\sigma = 0.6$)** and **40% random pixel erasure**:
+We executed the verification script in [plot_continuous_real.py](plot_continuous_real.py). The results on normalized continuous real-valued Fashion MNIST templates subjected to **extreme Gaussian noise ($\sigma = 0.6$)** and **40% random pixel erasure**:
 
 ```
 ================================================================================

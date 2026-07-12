@@ -20,7 +20,7 @@ We instantiated these equations symbolically with $d=784$ query variables $q_1, 
 
 ## 2. High-Precision Evaluation Results
 
-We ran the verification script in [symbolic_exact_solve.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/symbolic_exact_solve.py). Evaluated with 50 decimal digits of precision:
+We ran the verification script in [symbolic_exact_solve.py](symbolic_exact_solve.py). Evaluated with 50 decimal digits of precision:
 
 * **Attention Weights**:
   * **$w_0$ (Target Class)**: `1.0000000000000000000000000000000000000000000000000` (Exactly 1.0)

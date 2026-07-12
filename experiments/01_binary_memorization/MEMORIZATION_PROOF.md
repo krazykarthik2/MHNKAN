@@ -25,7 +25,7 @@ Our KAN layer maps a $N$-dimensional one-hot similarity score to the $d$-dimensi
 
 ## 2. Experimental Verification Log
 
-We ran the proof script in [memorize_proof_sparse.py](file:///C:/Users/karthikkrazy/Documents/antigravity/busy-einstein/memorize_proof_sparse.py). The output log shows:
+We ran the proof script in [memorize_proof_sparse.py](memorize_proof_sparse.py). The output log shows:
 
 ```
 ======================================================================
